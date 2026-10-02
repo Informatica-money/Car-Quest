@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="nl" class="h-full w-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slow Roads - Gentle Endless Trip</title>
+    <!-- Tailwind CSS for Responsive UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js 3D Graphics Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+        
+        body {
+            font-family: 'Outfit', sans-serif;
+            overflow: hidden;
+            user-select: none;
+            background-color: #0f172a;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .touch-button {
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+    </style>
+</head>
+<body class="text-white h-full w-full overflow-hidden">
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- HUD Overlay Layer -->
+    <div class="relative z-10 flex flex-col justify-between h-screen w-screen p-4 md:p-6 pointer-events-none">
+        
+        <!-- Top Navigation Header -->
+        <div class="flex justify-between items-start w-full">
+            <div class="glass-panel p-4 rounded-2xl max-w-sm pointer-events-auto shadow-2xl border-l-4 border-emerald-500">
+                <div class="flex items-center space-x-3 mb-1">
+                    <span class="p-2 bg-emerald-500/20 text-emerald-400 rounded-xl">
+                        <i class="fa-solid fa-road text-lg"></i>
+                    </span>
+                    <div>
+                        <h1 class="font-bold text-lg leading-none tracking-wide text-gray-100">Slow Roads Explorer</h1>
+                        <p class="text-xs text-emerald-400 font-medium mt-0.5" id="biome-tag">Glooiend Polderlandschap</p>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-300 mt-2 leading-relaxed">
+                    <i class="fa-solid fa-circle-check text-emerald-400 mr-1"></i>
+                    Het terrein is extra zacht afgesteld. De auto kantelt dynamisch mee op hellingen en overhelgedrag in bochten!
+                </p>
+            </div>
+
+            <!-- Weather & Camera Toggles -->
+            <div class="glass-panel p-2.5 rounded-2xl flex items-center space-x-2 pointer-events-auto shadow-xl">
+                <button id="btn-weather" class="px-3 py-2 bg-slate-800/80 hover:bg-slate-700 rounded-xl text-xs font-semibold flex items-center space-x-2 border border-slate-700 transition">
+                    <i class="fa-solid fa-sun text-amber-400"></i>
+                    <span id="weather-text" class="hidden sm:inline">Zonnig</span>
+                </button>
+                <button id="btn-camera" class="px-3 py-2 bg-slate-800/80 hover:bg-slate-700 rounded-xl text-xs font-semibold flex items-center space-x-2 border border-slate-700 transition">
+                    <i class="fa-solid fa-video text-cyan-400"></i>
+                    <span class="hidden sm:inline">Camera</span>
+                </button>
+                <button id="btn-reset" class="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-2 shadow-lg transition">
+                    <i class="fa-solid fa-rotate-right"></i>
+                    <span class="hidden sm:inline">Reset Weg</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Notification Toast -->
+        <div id="edu-card" class="self-center glass-panel px-6 py-3 rounded-full flex items-center space-x-3 pointer-events-auto transform -translate-y-4 opacity-0 transition-all duration-500 shadow-2xl border border-emerald-500/30">
+            <i class="fa-solid fa-car text-emerald-400 text-lg"></i>
+            <span class="text-sm font-medium text-gray-200" id="edu-card-text">Geavanceerde Voertuigdynamiek Actief</span>
+        </div>
+
+        <!-- Bottom Dashboard HUD -->
+        <div class="flex flex-col sm:flex-row justify-between items-end gap-4 w-full">
+            
+            <!-- Speedometer Panel -->
+            <div class="glass-panel p-4 rounded-2xl pointer-events-auto flex items-center space-x-5 shadow-2xl border-b-2 border-emerald-500">
+                <div class="text-center">
+                    <div class="text-3xl font-extrabold text-white tracking-tight" id="speed-display">0</div>
+                    <div class="text-[10px] text-gray-400 uppercase tracking-widest font-semibold">KM/U</div>
+                </div>
+                <div class="h-8 w-px bg-slate-700/80"></div>
+                <div>
+                    <div class="text-xs text-gray-400">Afstand Gereden</div>
+                    <div class="text-sm font-bold text-emerald-400" id="distance-display">0.0 km</div>
+                </div>
+                <div class="h-8 w-px bg-slate-700/80"></div>
+                <div>
+                    <div class="text-xs text-gray-400">Gegenereerd</div>
+                    <div class="text-sm font-bold text-cyan-400" id="chunk-count-display">25 Chunks</div>
+                </div>
+            </div>
+
+            <!-- Mobile Controls -->
+            <div class="flex sm:hidden space-x-3 pointer-events-auto w-full justify-between max-w-xs mx-auto">
+                <div class="flex space-x-2">
+                    <button id="touch-left" class="touch-button w-14 h-14 bg-slate-800/90 active:bg-emerald-600 rounded-2xl flex items-center justify-center text-xl shadow-lg border border-slate-700">
+                        <i class="fa-solid fa-arrow-left"></i>
+                    </button>
+                    <button id="touch-right" class="touch-button w-14 h-14 bg-slate-800/90 active:bg-emerald-600 rounded-2xl flex items-center justify-center text-xl shadow-lg border border-slate-700">
+                        <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                </div>
+                <div class="flex space-x-2">
+                    <button id="touch-brake" class="touch-button w-14 h-14 bg-red-900/80 active:bg-red-600 rounded-2xl flex items-center justify-center text-xl shadow-lg border border-red-700">
+                        <i class="fa-solid fa-hand"></i>
+                    </button>
+                    <button id="touch-gas" class="touch-button w-14 h-14 bg-emerald-700/90 active:bg-emerald-500 rounded-2xl flex items-center justify-center text-xl shadow-lg border border-emerald-600">
+                        <i class="fa-solid fa-gauge-high"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Controls Banner -->
+            <div class="hidden sm:block glass-panel px-4 py-3 rounded-2xl text-xs text-gray-300 pointer-events-auto">
+                <div class="flex items-center space-x-4">
+                    <span class="flex items-center"><kbd class="px-2 py-1 bg-slate-800 rounded text-gray-200 font-mono text-[10px] mr-1 border border-slate-700">W</kbd> / <kbd class="px-2 py-1 bg-slate-800 rounded text-gray-200 font-mono text-[10px] mr-1 border border-slate-700">↑</kbd> Gas</span>
+                    <span class="flex items-center"><kbd class="px-2 py-1 bg-slate-800 rounded text-gray-200 font-mono text-[10px] mr-1 border border-slate-700">A</kbd><kbd class="px-2 py-1 bg-slate-800 rounded text-gray-200 font-mono text-[10px] mr-1 border border-slate-700">D</kbd> Sturen</span>
+                    <span class="flex items-center"><kbd class="px-2 py-1 bg-slate-800 rounded text-gray-200 font-mono text-[10px] mr-1 border border-slate-700">S</kbd> / <kbd class="px-2 py-1 bg-slate-800 rounded text-gray-200 font-mono text-[10px] mr-1 border border-slate-700">Spatie</kbd> Rem</span>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        /**
+         * Simplex Noise Algorithm for Procedural Landscape Generation
+         */
+        const SimplexNoise = (function() {
+            const F2 = 0.5 * (Math.sqrt(3.0) - 1.0);
+            const G2 = (3.0 - Math.sqrt(3.0)) / 6.0;
+            
+            return class SimplexNoise {
+                constructor(seed = 12345) {
+                    this.p = new Uint8Array(256);
+                    let s = seed;
+                    for (let i = 0; i < 256; i++) {
+                        s = (s * 16807 + 11) % 2147483647;
+                        this.p[i] = Math.floor((s / 2147483647) * 256);
+                    }
+                    this.perm = new Uint8Array(512);
+                    this.permMod12 = new Uint8Array(512);
+                    for (let i = 0; i < 512; i++) {
+                        this.perm[i] = this.p[i & 255];
+                        this.permMod12[i] = (this.perm[i] % 12);
+                    }
+                }
+
+                noise2D(xin, yin) {
+                    const grad3 = [
+                        1,1, -1,1, 1,-1, -1,-1,
+                        1,0, -1,0, 1,0, -1,0,
+                        0,1, 0,-1, 0,1, 0,-1
+                    ];
+                    let n0, n1, n2;
+                    let s = (xin + yin) * F2;
+                    let i = Math.floor(xin + s);
+                    let j = Math.floor(yin + s);
+                    let t = (i + j) * G2;
+                    let X0 = i - t;
+                    let Y0 = j - t;
+                    let x0 = xin - X0;
+                    let y0 = yin - Y0;
+                    let i1, j1;
+                    if (x0 > y0) { i1 = 1; j1 = 0; }
+                    else { i1 = 0; j1 = 1; }
+                    let x1 = x0 - i1 + G2;
+                    let y1 = y0 - j1 + G2;
+                    let x2 = x0 - 1.0 + 2.0 * G2;
+                    let y2 = y0 - 1.0 + 2.0 * G2;
+                    let ii = i & 255;
+                    let jj = j & 255;
+                    let gi0 = this.permMod12[ii + this.perm[jj]];
+                    let gi1 = this.permMod12[ii + i1 + this.perm[jj + j1]];
+                    let gi2 = this.permMod12[ii + 1 + this.perm[jj + 1]];
+                    
+                    let t0 = 0.5 - x0*x0 - y0*y0;
+                    if (t0 < 0) n0 = 0.0;
+                    else {
+                        t0 *= t0;
+                        n0 = t0 * t0 * (grad3[gi0*2] * x0 + grad3[gi0*2+1] * y0);
+                    }
+                    let t1 = 0.5 - x1*x1 - y1*y1;
+                    if (t1 < 0) n1 = 0.0;
+                    else {
+                        t1 *= t1;
+                        n1 = t1 * t1 * (grad3[gi1*2] * x1 + grad3[gi1*2+1] * y1);
+                    }
+                    let t2 = 0.5 - x2*x2 - y2*y2;
+                    if (t2 < 0) n2 = 0.0;
+                    else {
+                        t2 *= t2;
+                        n2 = t2 * t2 * (grad3[gi2*2] * x2 + grad3[gi2*2+1] * y2);
+                    }
+                    return 70.0 * (n0 + n1 + n2);
+                }
+            };
+        })();
+
+        const simplex = new SimplexNoise(88);
+
+        // Simulation parameters
+        const CHUNK_SIZE = 120;             // Chunk dimensions
+        const CHUNK_SEGMENTS = 30;          // Mesh detail resolution
+        const RENDER_DISTANCE = 3;          // 7x7 grid of surrounding active chunks
+        const ROAD_WIDTH = 9;               // Comfortable wide asphalt road
+        const TREE_BUFFER_DISTANCE = 18;    // Safety zone keeping trees away from asphalt
+
+        const loadedChunks = new Map();
+        let scene, camera, renderer, clock;
+        let carGroup, carBody, wheelMeshes = [];
+        let ambientLight, dirLight, fog;
+
+        // Vehicle dynamics & physics state
+        const carState = {
+            x: 0,
+            z: 0,
+            y: 0,
+            angle: 0,
+            speed: 0,
+            maxSpeed: 1.15,
+            acceleration: 0.014,
+            friction: 0.988,
+            steering: 0,
+            turnSpeed: 0.038,
+            pitch: 0,
+            roll: 0,
+            bodyRoll: 0,
+            accPitch: 0,
+            distTraveled: 0
+        };
+
+        const keys = { forward: false, backward: false, left: false, right: false };
+        let cameraMode = 0; 
+        let weatherMode = 0; 
+
+        // Smoothstep helper function
+        Math.smoothstep = function(value, min, max) {
+            let x = Math.max(0, Math.min(1, (value - min) / (max - min)));
+            return x * x * (3 - 2 * x);
+        };
+
+        /**
+         * Calculates smooth winding road path X position at any Z coordinate
+         */
+        function getRoadX(z) {
+            return Math.sin(z * 0.006) * 35 + Math.sin(z * 0.002) * 80;
+        }
+
+        /**
+         * Calculates road base height elevation
+         */
+        function getRoadY(z) {
+            return Math.sin(z * 0.003) * 2.5 + Math.cos(z * 0.001) * 3.0;
+        }
+
+        /**
+         * Calculates distance from any world point to road centerline
+         */
+        function getDistanceToRoad(x, z) {
+            return Math.abs(x - getRoadX(z));
+        }
+
+        /**
+         * VERY GENTLE, NON-MOUNTAINOUS TERRAIN HEIGHTMAP
+         */
+        function getTerrainHeight(x, z) {
+            const rx = getRoadX(z);
+            const ry = getRoadY(z);
+            const distToRoad = Math.abs(x - rx);
+
+            // Subtiele heuvels: Lage amplitude voor een kalm, glooiend poldergevoel
+            let noiseH = simplex.noise2D(x * 0.002, z * 0.002) * 3.2;
+            noiseH += simplex.noise2D(x * 0.008, z * 0.008) * 0.8;
+
+            // Naadloze overgang rond de weg
+            const flattenRadius = 22;
+            if (distToRoad < flattenRadius) {
+                const factor = Math.smoothstep(distToRoad, 0, flattenRadius);
+                return ry * (1 - factor) + noiseH * factor;
+            }
+
+            return noiseH;
+        }
+
+        const materials = {
+            grass: new THREE.MeshLambertMaterial({ color: 0x55b65d, flatShading: true }),
+            grassDark: new THREE.MeshLambertMaterial({ color: 0x48a050, flatShading: true }),
+            road: new THREE.MeshStandardMaterial({ color: 0x2b3035, roughness: 0.8 }),
+            roadLine: new THREE.MeshBasicMaterial({ color: 0xfbbf24 }),
+            trunk: new THREE.MeshLambertMaterial({ color: 0x543d2b, flatShading: true }),
+            leaves1: new THREE.MeshLambertMaterial({ color: 0x22c55e, flatShading: true }),
+            leaves2: new THREE.MeshLambertMaterial({ color: 0x16a34a, flatShading: true }),
+            rock: new THREE.MeshLambertMaterial({ color: 0x94a3b8, flatShading: true }),
+            carBody: new THREE.MeshStandardMaterial({ color: 0x0284c7, metalness: 0.5, roughness: 0.2 }),
+            carWindow: new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.1, transparent: true, opacity: 0.85 }),
+            wheel: new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 })
+        };
+
+        function createTreeMesh(type = 0) {
+            const group = new THREE.Group();
+            
+            const trunkGeo = new THREE.CylinderGeometry(0.25, 0.45, 2.5, 5);
+            const trunk = new THREE.Mesh(trunkGeo, materials.trunk);
+            trunk.position.y = 1.25;
+            trunk.castShadow = true;
+            group.add(trunk);
+
+            const foliageMat = type === 0 ? materials.leaves1 : materials.leaves2;
+            
+            const leavesGeo = new THREE.ConeGeometry(1.8, 3.5, 5);
+            const leaves1 = new THREE.Mesh(leavesGeo, foliageMat);
+            leaves1.position.y = 3.2;
+            leaves1.castShadow = true;
+            group.add(leaves1);
+
+            const leaves2 = new THREE.Mesh(leavesGeo, foliageMat);
+            leaves2.position.y = 4.5;
+            leaves2.scale.set(0.75, 0.75, 0.75);
+            leaves2.castShadow = true;
+            group.add(leaves2);
+
+            return group;
+        }
+
+        function createRockMesh() {
+            const geo = new THREE.DodecahedronGeometry(0.7 + Math.random() * 0.5, 1);
+            const rock = new THREE.Mesh(geo, materials.rock);
+            rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+            rock.scale.set(1, 0.6 + Math.random() * 0.4, 1);
+            rock.castShadow = true;
+            return rock;
+        }
+
+        class TerrainChunk {
+            constructor(chunkX, chunkZ) {
+                this.chunkX = chunkX;
+                this.chunkZ = chunkZ;
+                this.worldX = chunkX * CHUNK_SIZE;
+                this.worldZ = chunkZ * CHUNK_SIZE;
+                this.group = new THREE.Group();
+
+                this.buildTerrain();
+                this.buildRoadSegment();
+                this.populateVegetation();
+
+                scene.add(this.group);
+            }
+
+            buildTerrain() {
+                const geo = new THREE.PlaneGeometry(
+                    CHUNK_SIZE, 
+                    CHUNK_SIZE, 
+                    CHUNK_SEGMENTS, 
+                    CHUNK_SEGMENTS
+                );
+                geo.rotateX(-Math.PI / 2);
+
+                const posAttr = geo.attributes.position;
+                for (let i = 0; i < posAttr.count; i++) {
+                    const localX = posAttr.getX(i);
+                    const localZ = posAttr.getZ(i);
+                    const globalX = this.worldX + localX;
+                    const globalZ = this.worldZ + localZ;
+
+                    const height = getTerrainHeight(globalX, globalZ);
+                    posAttr.setY(i, height);
+                }
+
+                geo.computeVertexNormals();
+                const mat = (Math.abs(this.chunkX + this.chunkZ) % 2 === 0) ? materials.grass : materials.grassDark;
+                const terrainMesh = new THREE.Mesh(geo, mat);
+                terrainMesh.position.set(this.worldX, 0, this.worldZ);
+                terrainMesh.receiveShadow = true;
+                this.group.add(terrainMesh);
+            }
+
+            buildRoadSegment() {
+                const steps = 16;
+                const halfSize = CHUNK_SIZE / 2;
+                const zStart = this.worldZ - halfSize;
+                const dz = CHUNK_SIZE / steps;
+
+                const roadGeo = new THREE.BufferGeometry();
+                const vertices = [];
+                const indices = [];
+
+                for (let i = 0; i <= steps; i++) {
+                    const currentZ = zStart + i * dz;
+                    const rx = getRoadX(currentZ);
+
+                    const nextRx = getRoadX(currentZ + 0.5);
+                    const dirX = nextRx - rx;
+                    const dirZ = 0.5;
+                    const len = Math.hypot(dirX, dirZ);
+                    const normX = -dirZ / len;
+                    const normZ = dirX / len;
+
+                    const leftX = rx + normX * (ROAD_WIDTH / 2);
+                    const leftZ = currentZ + normZ * (ROAD_WIDTH / 2);
+                    const rightX = rx - normX * (ROAD_WIDTH / 2);
+                    const rightZ = currentZ - normZ * (ROAD_WIDTH / 2);
+
+                    // Perfect Aansluiting op het Terrein (+ 0.03m offset voor z-fighting)
+                    const leftY = getTerrainHeight(leftX, leftZ) + 0.03;
+                    const rightY = getTerrainHeight(rightX, rightZ) + 0.03;
+
+                    vertices.push(
+                        leftX, leftY, leftZ,
+                        rightX, rightY, rightZ
+                    );
+
+                    if (i < steps) {
+                        const base = i * 2;
+                        indices.push(base, base + 1, base + 2);
+                        indices.push(base + 1, base + 3, base + 2);
+                    }
+                }
+
+                roadGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+                roadGeo.setIndex(indices);
+                roadGeo.computeVertexNormals();
+
+                const roadMesh = new THREE.Mesh(roadGeo, materials.road);
+                roadMesh.receiveShadow = true;
+                this.group.add(roadMesh);
+            }
+
+            populateVegetation() {
+                const seed = Math.sin(this.chunkX * 3741 + this.chunkZ * 8123) * 10000;
+                let pseudoRandom = function(offset) {
+                    const x = Math.sin(seed + offset) * 10000;
+                    return x - Math.floor(x);
+                };
+
+                const objectCount = 16;
+                for (let i = 0; i < objectCount; i++) {
+                    const localX = (pseudoRandom(i * 3) - 0.5) * (CHUNK_SIZE - 6);
+                    const localZ = (pseudoRandom(i * 3 + 1) - 0.5) * (CHUNK_SIZE - 6);
+                    const worldX = this.worldX + localX;
+                    const worldZ = this.worldZ + localZ;
+
+                    // Strikte controle op afstand tot het asfalt
+                    if (getDistanceToRoad(worldX, worldZ) < TREE_BUFFER_DISTANCE) {
+                        continue; // Geen bomen/rotsen op of direct naast de weg!
+                    }
+
+                    const terrainY = getTerrainHeight(worldX, worldZ);
+                    const objectType = pseudoRandom(i * 7);
+
+                    if (objectType > 0.35) {
+                        const tree = createTreeMesh(Math.floor(pseudoRandom(i * 11) * 2));
+                        tree.position.set(worldX, terrainY, worldZ);
+                        const scale = 0.85 + pseudoRandom(i * 13) * 0.4;
+                        tree.scale.set(scale, scale, scale);
+                        tree.rotation.y = pseudoRandom(i * 17) * Math.PI * 2;
+                        this.group.add(tree);
+                    } else {
+                        const rock = createRockMesh();
+                        rock.position.set(worldX, terrainY + 0.15, worldZ);
+                        this.group.add(rock);
+                    }
+                }
+            }
+
+            destroy() {
+                scene.remove(this.group);
+                this.group.traverse(child => {
+                    if (child.isMesh) child.geometry.dispose();
+                });
+            }
+        }
+
+        function updateChunks() {
+            const currentChunkX = Math.floor((carState.x + CHUNK_SIZE / 2) / CHUNK_SIZE);
+            const currentChunkZ = Math.floor((carState.z + CHUNK_SIZE / 2) / CHUNK_SIZE);
+
+            const activeKeys = new Set();
+
+            for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; dx++) {
+                for (let dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; dz++) {
+                    const cx = currentChunkX + dx;
+                    const cz = currentChunkZ + dz;
+                    const key = `${cx},${cz}`;
+                    activeKeys.add(key);
+
+                    if (!loadedChunks.has(key)) {
+                        loadedChunks.set(key, new TerrainChunk(cx, cz));
+                    }
+                }
+            }
+
+            for (const [key, chunk] of loadedChunks.entries()) {
+                if (!activeKeys.has(key)) {
+                    chunk.destroy();
+                    loadedChunks.delete(key);
+                }
+            }
+
+            document.getElementById('chunk-count-display').innerText = loadedChunks.size + " Chunks";
+        }
+
+        function createVehicle() {
+            carGroup = new THREE.Group();
+
+            // Car Chassis
+            const bodyGeo = new THREE.BoxGeometry(1.8, 0.65, 3.5);
+            carBody = new THREE.Mesh(bodyGeo, materials.carBody);
+            carBody.position.y = 0.6;
+            carBody.castShadow = true;
+            carGroup.add(carBody);
+
+            // Cabin Roof
+            const cabinGeo = new THREE.BoxGeometry(1.35, 0.55, 1.7);
+            const cabin = new THREE.Mesh(cabinGeo, materials.carWindow);
+            cabin.position.set(0, 1.1, -0.15);
+            carGroup.add(cabin);
+
+            // Wheels Assembly
+            const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.28, 14);
+            wheelGeo.rotateZ(Math.PI / 2);
+
+            const wheelPositions = [
+                [-0.92, 0.34, 1.05],
+                [0.92, 0.34, 1.05],
+                [-0.92, 0.34, -1.05],
+                [0.92, 0.34, -1.05]
+            ];
+
+            wheelMeshes = [];
+            wheelPositions.forEach(pos => {
+                const wheel = new THREE.Mesh(wheelGeo, materials.wheel);
+                wheel.position.set(...pos);
+                wheel.castShadow = true;
+                carGroup.add(wheel);
+                wheelMeshes.push(wheel);
+            });
+
+            // Headlights
+            const lightGeo = new THREE.BoxGeometry(0.28, 0.12, 0.08);
+            const lightMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            
+            const leftLight = new THREE.Mesh(lightGeo, lightMat);
+            leftLight.position.set(-0.6, 0.6, 1.76);
+            carGroup.add(leftLight);
+
+            const rightLight = new THREE.Mesh(lightGeo, lightMat);
+            rightLight.position.set(0.6, 0.6, 1.76);
+            carGroup.add(rightLight);
+
+            scene.add(carGroup);
+        }
+
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb);
+
+            fog = new THREE.FogExp2(0x87ceeb, 0.0038);
+            scene.fog = fog;
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+            scene.add(ambientLight);
+
+            dirLight = new THREE.DirectionalLight(0xfff5e6, 1.15);
+            dirLight.position.set(80, 120, 40);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 350;
+            const d = 70;
+            dirLight.shadow.camera.left = -d;
+            dirLight.shadow.camera.right = d;
+            dirLight.shadow.camera.top = d;
+            dirLight.shadow.camera.bottom = -d;
+            scene.add(dirLight);
+
+            clock = new THREE.Clock();
+
+            carState.x = getRoadX(0);
+            carState.z = 0;
+
+            createVehicle();
+            updateChunks();
+
+            window.addEventListener('resize', onWindowResize, false);
+            setupInputListeners();
+        }
+
+        function setupInputListeners() {
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') keys.forward = true;
+                if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') keys.backward = true;
+                if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') keys.left = true;
+                if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') keys.right = true;
+                if (e.code === 'Space') keys.backward = true;
+            });
+
+            window.addEventListener('keyup', (e) => {
+                if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') keys.forward = false;
+                if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') keys.backward = false;
+                if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') keys.left = false;
+                if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') keys.right = false;
+                if (e.code === 'Space') keys.backward = false;
+            });
+
+            const bindTouch = (id, keyName) => {
+                const btn = document.getElementById(id);
+                if (!btn) return;
+                btn.addEventListener('touchstart', (e) => { e.preventDefault(); keys[keyName] = true; });
+                btn.addEventListener('touchend', (e) => { e.preventDefault(); keys[keyName] = false; });
+                btn.addEventListener('mousedown', () => { keys[keyName] = true; });
+                btn.addEventListener('mouseup', () => { keys[keyName] = false; });
+            };
+
+            bindTouch('touch-gas', 'forward');
+            bindTouch('touch-brake', 'backward');
+            bindTouch('touch-left', 'left');
+            bindTouch('touch-right', 'right');
+
+            document.getElementById('btn-reset').addEventListener('click', () => {
+                carState.x = getRoadX(carState.z);
+                carState.speed = 0;
+                showEduToast("Auto teruggeplaatst op het asfalt!");
+            });
+
+            document.getElementById('btn-camera').addEventListener('click', () => {
+                cameraMode = (cameraMode + 1) % 3;
+            });
+
+            document.getElementById('btn-weather').addEventListener('click', () => {
+                weatherMode = (weatherMode + 1) % 3;
+                if (weatherMode === 0) {
+                    scene.background.setHex(0x87ceeb);
+                    fog.color.setHex(0x87ceeb);
+                    document.getElementById('weather-text').innerText = "Zonnig";
+                } else if (weatherMode === 1) {
+                    scene.background.setHex(0xfb923c);
+                    fog.color.setHex(0xfb923c);
+                    document.getElementById('weather-text').innerText = "Zonsondergang";
+                } else {
+                    scene.background.setHex(0xd1d5db);
+                    fog.color.setHex(0xd1d5db);
+                    document.getElementById('weather-text').innerText = "Ochtendmist";
+                }
+            });
+        }
+
+        function showEduToast(msg) {
+            const card = document.getElementById('edu-card');
+            const text = document.getElementById('edu-card-text');
+            text.innerText = msg;
+            card.classList.remove('opacity-0', '-translate-y-4');
+            card.classList.add('opacity-100', 'translate-y-0');
+
+            setTimeout(() => {
+                card.classList.remove('opacity-100', 'translate-y-0');
+                card.classList.add('opacity-0', '-translate-y-4');
+            }, 3500);
+        }
+
+        function updatePhysics() {
+            // Speed & Acceleration
+            if (keys.forward) {
+                carState.speed = Math.min(carState.speed + carState.acceleration, carState.maxSpeed);
+                carState.accPitch = THREE.MathUtils.lerp(carState.accPitch, -0.04, 0.1); // Squat bij optrekken
+            } else if (keys.backward) {
+                carState.speed = Math.max(carState.speed - carState.acceleration * 1.5, -carState.maxSpeed * 0.4);
+                carState.accPitch = THREE.MathUtils.lerp(carState.accPitch, 0.06, 0.15); // Duiken bij remmen
+            } else {
+                carState.speed *= carState.friction;
+                carState.accPitch = THREE.MathUtils.lerp(carState.accPitch, 0, 0.1);
+            }
+
+            // Steering & Centrifugal Body Roll
+            let steerDir = 0;
+            if (Math.abs(carState.speed) > 0.02) {
+                const dir = carState.speed > 0 ? 1 : -1;
+                if (keys.left) { carState.angle += carState.turnSpeed * dir; steerDir = -1; }
+                if (keys.right) { carState.angle -= carState.turnSpeed * dir; steerDir = 1; }
+            }
+
+            // Body roll (overhellen in bochten)
+            const targetBodyRoll = steerDir * (carState.speed / carState.maxSpeed) * 0.08;
+            carState.bodyRoll = THREE.MathUtils.lerp(carState.bodyRoll, targetBodyRoll, 0.12);
+
+            // Update World Position
+            carState.x += Math.sin(carState.angle) * carState.speed;
+            carState.z += Math.cos(carState.angle) * carState.speed;
+
+            // 4-Wheel Terrain Elevation Sampling
+            const forwardX = Math.sin(carState.angle);
+            const forwardZ = Math.cos(carState.angle);
+            const rightX = Math.cos(carState.angle);
+            const rightZ = -Math.sin(carState.angle);
+
+            // Sampling positions for 4 corners of the car
+            const frontY = getTerrainHeight(carState.x + forwardX * 1.5, carState.z + forwardZ * 1.5);
+            const backY = getTerrainHeight(carState.x - forwardX * 1.5, carState.z - forwardZ * 1.5);
+            const leftY = getTerrainHeight(carState.x - rightX * 0.85, carState.z - rightZ * 0.85);
+            const rightY = getTerrainHeight(carState.x + rightX * 0.85, carState.z + rightZ * 0.85);
+
+            carState.y = (frontY + backY + leftY + rightY) / 4;
+
+            // Calculate Terrain Pitch & Roll Angle
+            const terrainPitch = Math.atan2(frontY - backY, 3.0);
+            const terrainRoll = Math.atan2(leftY - rightY, 1.7);
+
+            carState.pitch = THREE.MathUtils.lerp(carState.pitch, terrainPitch + carState.accPitch, 0.2);
+            carState.roll = THREE.MathUtils.lerp(carState.roll, terrainRoll + carState.bodyRoll, 0.2);
+
+            // Apply positions and dynamic rotations to car mesh
+            carGroup.position.set(carState.x, carState.y, carState.z);
+            carGroup.rotation.y = carState.angle;
+            carGroup.rotation.x = carState.pitch;
+            carGroup.rotation.z = carState.roll;
+
+            // Rotate wheel meshes when rolling forward
+            const wheelSpin = carState.speed * 0.6;
+            wheelMeshes.forEach(w => w.rotation.x += wheelSpin);
+
+            // Stats update
+            carState.distTraveled += Math.abs(carState.speed) * 0.05;
+            document.getElementById('speed-display').innerText = Math.round(Math.abs(carState.speed) * 110);
+            document.getElementById('distance-display').innerText = carState.distTraveled.toFixed(1) + " km";
+
+            updateChunks();
+        }
+
+        function updateCamera() {
+            if (cameraMode === 0) {
+                // Smooth 3rd Person Chase
+                const targetCamX = carState.x - Math.sin(carState.angle) * 11;
+                const targetCamZ = carState.z - Math.cos(carState.angle) * 11;
+                const targetCamY = carState.y + 4.5;
+
+                camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetCamX, 0.08);
+                camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetCamY, 0.08);
+                camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetCamZ, 0.08);
+
+                camera.lookAt(carState.x, carState.y + 1.1, carState.z);
+            } else if (cameraMode === 1) {
+                // Cockpit View
+                camera.position.set(carState.x, carState.y + 1.15, carState.z);
+                const lookX = carState.x + Math.sin(carState.angle) * 20;
+                const lookZ = carState.z + Math.cos(carState.angle) * 20;
+                camera.lookAt(lookX, carState.y + 1.15, lookZ);
+            } else {
+                // High Angle Drone
+                camera.position.set(carState.x + 18, carState.y + 30, carState.z - 22);
+                camera.lookAt(carState.x, carState.y, carState.z);
+            }
+
+            dirLight.position.set(carState.x + 70, carState.y + 100, carState.z + 40);
+            dirLight.target = carGroup;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            updatePhysics();
+            updateCamera();
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = function() {
+            initScene();
+            animate();
+            setTimeout(() => {
+                showEduToast("Rustig polderlandschap geladen met dynamische vering!");
+            }, 800);
+        };
+    </script>
+</body>
+</html>
