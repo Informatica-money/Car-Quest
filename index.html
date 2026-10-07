@@ -79,7 +79,7 @@
                     <button class="w-full py-1.5 md:py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs transition-all shadow-md shadow-sky-500/20">Selecteer</button>
                 </div>
 
-                <!-- 2. V10 Sportwagen -->
+                <!-- 2. Elektrische Sportwagen -->
                 <div onclick="selectCar('sportscar')" class="car-card aspect-square flex-1 min-w-[130px] md:min-w-[170px] glass-panel rounded-2xl p-3 md:p-4 border border-white/10 flex flex-col justify-between items-center text-center cursor-pointer group hover:bg-slate-800/80">
                     <div class="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-xl md:text-2xl border border-amber-500/30 mt-1">
                         <i class="fa-solid fa-bolt"></i>
@@ -88,7 +88,7 @@
                         <h3 class="text-xs md:text-base font-bold text-white group-hover:text-amber-400 transition-colors leading-tight">Sportwagen</h3>
                         <p class="text-[10px] md:text-xs text-amber-300/80 font-mono mt-1">220 km/u • 3.8s</p>
                         <span class="inline-block mt-1 text-[9px] md:text-[10px] text-amber-300 font-semibold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
-                            <i class="fa-solid fa-gauge-high text-[8px] mr-1"></i>V10
+                            <i class="fa-solid fa-atom text-[8px] mr-1"></i>EV Whine
                         </span>
                     </div>
                     <button class="w-full py-1.5 md:py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all shadow-md shadow-amber-500/20">Selecteer</button>
@@ -326,7 +326,6 @@
                 audio: {
                     oscType: 'sawtooth',
                     subType: 'sine',
-                    cylinders: 4,
                     pitchMult: 1.0,
                     filterQ: 1.0,
                     filterBase: 180,
@@ -336,24 +335,23 @@
                 }
             },
             sportscar: {
-                name: 'V10 Sportwagen',
+                name: 'Elektrische Sportwagen',
                 maxSpeedKmH: 220,
                 baseAccel: 9.8,
                 steerSpeed: 0.0048,
                 maxSteer: 0.040,
                 fuelBurnRate: 1.1,
                 color: 0xd97706,
-                soundProfileName: 'Hoogtoerige V10',
+                soundProfileName: 'EV High-Tech Turbine',
                 audio: {
-                    oscType: 'sawtooth',
+                    oscType: 'sine',
                     subType: 'triangle',
-                    cylinders: 10,
-                    pitchMult: 1.2,
-                    filterQ: 1.8,
-                    filterBase: 180,
-                    filterScale: 2600,
-                    subGainVal: 0.035,
-                    intakeGain: 0.35,
+                    pitchMult: 2.2,
+                    filterQ: 5.0,
+                    filterBase: 500,
+                    filterScale: 3800,
+                    subGainVal: 0.08,
+                    isEV: true,
                     hasPulse: false
                 }
             },
@@ -369,7 +367,6 @@
                 audio: {
                     oscType: 'triangle',
                     subType: 'sawtooth',
-                    cylinders: 6,
                     pitchMult: 0.9,
                     filterQ: 2.5,
                     filterBase: 220,
@@ -390,7 +387,6 @@
                 audio: {
                     oscType: 'sawtooth',
                     subType: 'sawtooth',
-                    cylinders: 8,
                     pitchMult: 0.65,
                     filterQ: 1.2,
                     filterBase: 100,
@@ -412,7 +408,6 @@
                 audio: {
                     oscType: 'square',
                     subType: 'sine',
-                    cylinders: 4,
                     pitchMult: 0.55,
                     filterQ: 1.0,
                     filterBase: 130,
@@ -466,16 +461,12 @@
         let audioCtx = null;
         let isAudioMuted = false;
         let engineOsc = null;
-        let engineHarmonicOsc = null;
         let engineGain = null;
         let engineFilter = null;
         let subOsc = null;
         let subGain = null;
         let lfoOsc = null;
         let lfoGain = null;
-        let windSource = null;
-        let windFilter = null;
-        let windGain = null;
 
         function initAudioEngine() {
             if (audioCtx) return;
@@ -499,40 +490,17 @@
                 engineGain.connect(audioCtx.destination);
                 engineOsc.start();
 
-                engineHarmonicOsc = audioCtx.createOscillator();
-                engineHarmonicOsc.type = 'triangle';
-                const harmonicGain = audioCtx.createGain();
-                harmonicGain.gain.setValueAtTime(0.025, audioCtx.currentTime);
-                engineHarmonicOsc.connect(harmonicGain);
-                harmonicGain.connect(engineFilter);
-                engineHarmonicOsc.start();
-
-                // Lower engine and exhaust harmonics add body to the engine note.
+                // Sub Oscillator (for EV Whine or V8 Bass or Engine Rumble)
                 subOsc = audioCtx.createOscillator();
                 subOsc.type = 'sine';
                 
                 subGain = audioCtx.createGain();
                 subGain.gain.setValueAtTime(0.02, audioCtx.currentTime);
 
-                subOsc.connect(engineFilter);
+                subOsc.connect(audioCtx.destination);
                 subOsc.start();
 
-                const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
-                const noiseData = noiseBuffer.getChannelData(0);
-                for (let i = 0; i < noiseData.length; i++) noiseData[i] = Math.random() * 2 - 1;
-                windSource = audioCtx.createBufferSource();
-                windSource.buffer = noiseBuffer;
-                windSource.loop = true;
-                windFilter = audioCtx.createBiquadFilter();
-                windFilter.type = 'lowpass';
-                windGain = audioCtx.createGain();
-                windGain.gain.setValueAtTime(0, audioCtx.currentTime);
-                windSource.connect(windFilter);
-                windFilter.connect(windGain);
-                windGain.connect(audioCtx.destination);
-                windSource.start();
-
-                // Subtle cyclic amplitude modulation, most noticeable on the camper.
+                // LFO Oscillator (for Camper "Chug-Chug" rhythm)
                 lfoOsc = audioCtx.createOscillator();
                 lfoOsc.type = 'sine';
                 lfoOsc.frequency.setValueAtTime(8, audioCtx.currentTime);
@@ -557,7 +525,6 @@
             if (engineOsc) engineOsc.type = a.oscType;
             if (subOsc) subOsc.type = a.subType;
             if (engineFilter) engineFilter.Q.setValueAtTime(a.filterQ, audioCtx.currentTime);
-            if (windGain) windGain.gain.setTargetAtTime(a.intakeGain || 0.22, audioCtx.currentTime, 0.2);
         }
 
         function toggleAudioMute() {
@@ -570,7 +537,6 @@
                 statusText.innerText = 'Geluid Uit';
                 if (engineGain) engineGain.gain.setValueAtTime(0, audioCtx.currentTime);
                 if (subGain) subGain.gain.setValueAtTime(0, audioCtx.currentTime);
-                if (windGain) windGain.gain.setValueAtTime(0, audioCtx.currentTime);
             } else {
                 icon.className = 'fa-solid fa-volume-high text-emerald-400';
                 statusText.innerText = 'Geluid Aan';
@@ -586,19 +552,33 @@
             const profile = CAR_PROFILES[selectedCarType] || CAR_PROFILES.hatchback;
             const a = profile.audio;
 
-            const now = audioCtx.currentTime;
-            const firingFrequency = Math.max(12, (rpm / 120) * (a.cylinders || 4));
-            const crankFrequency = Math.max(12, rpm / 60);
-            engineOsc.frequency.setTargetAtTime(firingFrequency * a.pitchMult, now, 0.06);
-            engineHarmonicOsc.frequency.setTargetAtTime(crankFrequency, now, 0.08);
-            subOsc.frequency.setTargetAtTime(Math.max(18, crankFrequency * 0.5), now, 0.08);
+            // Pitch mapped specifically per vehicle audio config
+            let targetFreq = Math.max(30, (rpm / 6500) * 150 * a.pitchMult + 30);
+            
+            // Special EV Whine Frequency Boost
+            if (a.isEV) {
+                targetFreq = 200 + (Math.abs(speedKmH) * 18) + (rpm / 6500) * 600;
+            }
 
-            const filterCutoff = Math.max(a.filterBase, (rpm / 6500) * a.filterScale + (Math.abs(speedKmH) * 3));
-            engineFilter.frequency.setTargetAtTime(filterCutoff, now, 0.08);
-            engineGain.gain.setTargetAtTime(isAccelerating ? 0.075 : 0.035, now, 0.12);
-            subGain.gain.setTargetAtTime(a.subGainVal * (isAccelerating ? 1.25 : 0.55), now, 0.12);
-            windFilter.frequency.setTargetAtTime(500 + Math.abs(speedKmH) * 20, now, 0.15);
-            windGain.gain.setTargetAtTime(Math.min(0.12, Math.abs(speedKmH) / 2200), now, 0.2);
+            engineOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.05);
+
+            // Filter Cutoff scaled per vehicle audio config
+            const filterCutoff = Math.max(a.filterBase, (rpm / 6500) * a.filterScale + (Math.abs(speedKmH) * 6));
+            engineFilter.frequency.setTargetAtTime(filterCutoff, audioCtx.currentTime, 0.08);
+
+            // Engine Gain
+            const targetGain = isAccelerating ? 0.12 : 0.05;
+            engineGain.gain.setTargetAtTime(targetGain, audioCtx.currentTime, 0.1);
+
+            // Sub-Oscillator (V8 sub-bass or EV secondary harmonic whine)
+            if (subGain) {
+                let subFreq = targetFreq * 0.5;
+                if (a.isEV) subFreq = targetFreq * 1.5; // High EV harmonic
+                
+                subOsc.frequency.setTargetAtTime(subFreq, audioCtx.currentTime, 0.05);
+                const subVolume = isAccelerating ? a.subGainVal * 1.5 : a.subGainVal;
+                subGain.gain.setTargetAtTime(subVolume, audioCtx.currentTime, 0.1);
+            }
 
             // LFO pulse for Camper "Chug-Chug" engine rhythm
             if (lfoGain && lfoOsc) {
@@ -656,24 +636,13 @@
         let car, carModelGroup;
         let wheels = [];
         let roadMesh, centerLineMesh;
-        let bermMeshes = [];
-        let edgeLineMeshes = [];
-        let bermMaterial, edgeLineMaterial;
         const WORLD_SEED = 20261007;
         const CHUNK_SIZE = 200;
-        const CHUNK_RADIUS = 3;
-        const ROAD_WIDTH = 9;
-        const BERM_WIDTH = 4;
-        const WORLD_SIZE = 1000;
+        const CHUNK_RADIUS = 2;
+        const ROAD_WIDTH = 12;
         const worldChunks = new Map();
         let terrainMaterial, roadMaterial, centerLineMaterial;
         let treeGeometry, trunkGeometry, treeMaterial, trunkMaterial;
-        let broadleafGeometry, pineGeometry, bushGeometry;
-        let broadleafMaterial, pineMaterial, bushMaterial;
-        let lakeMaterial;
-        let guardrailMaterial, guardrailPostMaterial;
-        let guardrailGeometry, guardrailPostGeometry;
-        const worldLakes = new Map();
         let lastRoadWindow = null;
         let gameStarted = false;
         let selectedCarType = 'hatchback';
@@ -715,11 +684,11 @@
 
             // 3D Scene setup
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x91c9f4);
-            scene.fog = new THREE.FogExp2(0x9bc7e7, 0.00072);
+            scene.background = new THREE.Color(0x87ceeb);
+            scene.fog = new THREE.FogExp2(0x87ceeb, 0.0012);
 
             // Camera setup
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 3200);
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
 
             // WebGL Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -730,17 +699,17 @@
             container.appendChild(renderer.domElement);
 
             // Lighting
-            const ambientLight = new THREE.HemisphereLight(0xd9efff, 0x617447, 1.15);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
             scene.add(ambientLight);
 
-            const dirLight = new THREE.DirectionalLight(0xfff3d6, 1.45);
-            dirLight.position.set(-100, 190, -120);
+            const dirLight = new THREE.DirectionalLight(0xfff5ea, 1.0);
+            dirLight.position.set(100, 150, 50);
             dirLight.castShadow = true;
             dirLight.shadow.mapSize.width = 2048;
             dirLight.shadow.mapSize.height = 2048;
             dirLight.shadow.camera.near = 0.5;
             dirLight.shadow.camera.far = 500;
-            const d = 170;
+            const d = 120;
             dirLight.shadow.camera.left = -d;
             dirLight.shadow.camera.right = d;
             dirLight.shadow.camera.top = d;
@@ -804,14 +773,6 @@
                 const rim = new THREE.Mesh(rimGeo, rimMat);
                 wheelGroup.add(rim);
 
-                const sidewall = new THREE.Mesh(new THREE.TorusGeometry(radius * 0.72, radius * 0.025, 8, 24), tireMat);
-                sidewall.rotation.y = Math.PI / 2;
-                sidewall.position.x = width * 0.48;
-                wheelGroup.add(sidewall);
-                const hubGeo = new THREE.CylinderGeometry(radius * 0.16, radius * 0.16, width + 0.05, 12);
-                hubGeo.rotateZ(Math.PI / 2);
-                wheelGroup.add(new THREE.Mesh(hubGeo, chromeMat));
-
                 const spokeGeo = new THREE.BoxGeometry(width + 0.03, radius * 1.1, 0.06);
                 const spoke1 = new THREE.Mesh(spokeGeo, chromeMat);
                 const spoke2 = new THREE.Mesh(spokeGeo, chromeMat);
@@ -851,25 +812,6 @@
                 const wing = new THREE.Mesh(wingGeo, darkTrimMat);
                 wing.position.set(0, 1.1, 2.1);
                 carModelGroup.add(wing);
-                const wingPostGeo = new THREE.BoxGeometry(0.08, 0.38, 0.12);
-                [-0.72, 0.72].forEach((x) => {
-                    const post = new THREE.Mesh(wingPostGeo, darkTrimMat);
-                    post.position.set(x, 0.94, 2.05);
-                    carModelGroup.add(post);
-                });
-
-                const intakeGeo = new THREE.BoxGeometry(0.12, 0.38, 0.65);
-                [-1.08, 1.08].forEach((x) => {
-                    const intake = new THREE.Mesh(intakeGeo, darkTrimMat);
-                    intake.position.set(x, 0.73, 0.45);
-                    carModelGroup.add(intake);
-                });
-                const splitter = new THREE.Mesh(new THREE.BoxGeometry(2.25, 0.08, 0.38), darkTrimMat);
-                splitter.position.set(0, 0.28, -2.3);
-                carModelGroup.add(splitter);
-                const diffuser = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.16, 0.3), darkTrimMat);
-                diffuser.position.set(0, 0.28, 2.32);
-                carModelGroup.add(diffuser);
 
             } else if (type === 'cabrio') {
                 const bodyGeo = new THREE.BoxGeometry(2.1, 0.65, 4.4);
@@ -937,60 +879,6 @@
             }
 
             // Universal Mirrors & Lights
-            const addPart = (geometry, material, x, y, z, rotationY = 0) => {
-                const part = new THREE.Mesh(geometry, material);
-                part.position.set(x, y, z);
-                part.rotation.y = rotationY;
-                part.castShadow = true;
-                carModelGroup.add(part);
-                return part;
-            };
-            const headlightMat = new THREE.MeshStandardMaterial({
-                color: 0xf8fafc,
-                emissive: 0x64748b,
-                emissiveIntensity: 0.35,
-                roughness: 0.2
-            });
-            const indicatorMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
-            const frontBumper = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.22, 0.22), darkTrimMat);
-            frontBumper.position.set(0, 0.38, -2.18);
-            carModelGroup.add(frontBumper);
-            const grille = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.32, 0.06), darkTrimMat);
-            grille.position.set(0, 0.58, -2.17);
-            carModelGroup.add(grille);
-            for (let i = 0; i < 4; i++) {
-                const slat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.025, 0.025), chromeMat);
-                slat.position.set(0, 0.46 + i * 0.075, -2.205);
-                carModelGroup.add(slat);
-            }
-            [-0.72, 0.72].forEach((x) => {
-                addPart(new THREE.BoxGeometry(0.48, 0.2, 0.09), headlightMat, x, 0.82, -2.16);
-                addPart(new THREE.BoxGeometry(0.12, 0.12, 0.08), indicatorMat, x * 1.34, 0.8, -2.14);
-            });
-
-            [-1, 1].forEach((side) => {
-                const sill = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.18, 2.5), darkTrimMat);
-                sill.position.set(side * 1.06, 0.38, 0);
-                carModelGroup.add(sill);
-                for (let door = 0; door < 2; door++) {
-                    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.045, 0.045), chromeMat);
-                    handle.position.set(side * 1.07, type === 'suv' || type === 'camper' ? 1.0 : 0.94, -0.55 + door * 1.0);
-                    carModelGroup.add(handle);
-                }
-                const sideWindow = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.48, type === 'sportscar' ? 1.15 : 1.35), glassMat);
-                sideWindow.position.set(side * 1.02, type === 'suv' || type === 'camper' ? 1.75 : 1.35, -0.05);
-                carModelGroup.add(sideWindow);
-            });
-
-            const windscreen = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.48, 0.055), glassMat);
-            windscreen.position.set(0, type === 'suv' || type === 'camper' ? 1.55 : 1.2, -1.1);
-            windscreen.rotation.x = -0.35;
-            carModelGroup.add(windscreen);
-            const rearGlass = windscreen.clone();
-            rearGlass.position.z = 1.05;
-            rearGlass.rotation.x = 0.35;
-            carModelGroup.add(rearGlass);
-
             const mirrorGeo = new THREE.BoxGeometry(0.25, 0.18, 0.15);
             const mirrorL = new THREE.Mesh(mirrorGeo, darkTrimMat);
             mirrorL.position.set(-1.18, 1.15, -0.8);
@@ -1025,10 +913,6 @@
             return ((h ^ (h >>> 16)) >>> 0) / 4294967295 * 2 - 1;
         }
 
-        function random01(seed) {
-            return hashNoise(seed) * 0.5 + 0.5;
-        }
-
         function smoothNoise(t) {
             return t * t * t * (t * (t * 6 - 15) + 10);
         }
@@ -1050,96 +934,39 @@
         }
 
         function getRawTerrainHeight(x, z) {
-            return noise2D(x * 0.00048, z * 0.00062) * 28
-                + noise2D(x * 0.0012, z * 0.0012) * 22
-                + noise2D(x * 0.004, z * 0.004) * 8
+            return noise2D(x * 0.0012, z * 0.0012) * 28
+                + noise2D(x * 0.004, z * 0.004) * 10
                 + noise2D(x * 0.015, z * 0.015) * 2.5;
         }
 
         function getRoadX(z) {
-            return Math.sin(z * 0.004) * 45 + Math.sin(z * 0.011) * 12;
-        }
-
-        function roadCenterX(z) {
-            return getRoadX(z);
+            // Since x is a function of z, the centerline cannot cross itself.
+            return noise1D(z / 260) * 42 + noise1D(z / 780 + 31.7) * 18;
         }
 
         function getRoadHeight(z) {
             const x = getRoadX(z);
-            return noise2D(x * 0.00045, z * 0.00055) * 15
-                + noise2D(x * 0.0012, z * 0.0012) * 4;
-        }
-
-        function getLakeForBand(band) {
-            const centerZ = band * 1050 + 525;
-            const side = hashNoise(band, 243) < 0 ? -1 : 1;
-            const centerX = getRoadX(centerZ) + side * (195 + hashNoise(band, 921) * 35);
-            const waterY = getRoadHeight(centerZ) - 3;
-            return { band, centerX, centerZ, waterY, radiusX: 145, radiusZ: 210 };
-        }
-
-        function getLakeAt(x, z) {
-            const band = Math.floor(z / 1050);
-            for (let i = band - 1; i <= band + 1; i++) {
-                const lake = getLakeForBand(i);
-                const dx = (x - lake.centerX) / lake.radiusX;
-                const dz = (z - lake.centerZ) / lake.radiusZ;
-                const distance = Math.sqrt(dx * dx + dz * dz);
-                if (distance < 1) return { lake, distance };
-            }
-            return null;
+            return noise2D(x * 0.00055, z * 0.00055) * 18
+                + noise2D(x * 0.0014, z * 0.0014) * 5;
         }
 
         function getTerrainHeight(x, z) {
             const terrain = getRawTerrainHeight(x, z);
             const roadX = getRoadX(z);
             const distance = Math.abs(x - roadX);
-            let height = terrain;
-            if (distance < 25) {
-                const roadHeight = getRoadHeight(z);
-                const blend = THREE.MathUtils.smoothstep(distance, ROAD_WIDTH * 0.5, 25);
-                height = THREE.MathUtils.lerp(roadHeight, terrain, blend);
-            }
+            if (distance >= 19) return terrain;
 
-            const lakeAt = getLakeAt(x, z);
-            if (lakeAt) {
-                const shore = THREE.MathUtils.smoothstep(lakeAt.distance, 0.78, 1);
-                height = THREE.MathUtils.lerp(lakeAt.lake.waterY - 1.2, height, shore);
-            }
-            return height;
-        }
-
-        function terrainHeight(x, z) {
-            return getTerrainHeight(x, z);
+            const roadHeight = getRoadHeight(z);
+            const blend = THREE.MathUtils.smoothstep(distance, ROAD_WIDTH * 0.5, 19);
+            return THREE.MathUtils.lerp(roadHeight, terrain, blend);
         }
 
         function createTerrain() {
             terrainMaterial = new THREE.MeshStandardMaterial({
-                color: 0xffffff,
-                vertexColors: true,
+                color: 0x4d7c0f,
                 roughness: 0.9,
-                metalness: 0
+                metalness: 0.1
             });
-            lakeMaterial = new THREE.MeshStandardMaterial({
-                color: 0x4b9fbd,
-                roughness: 0.22,
-                metalness: 0.08,
-                transparent: true,
-                opacity: 0.88,
-                side: THREE.DoubleSide
-            });
-            guardrailMaterial = new THREE.MeshStandardMaterial({
-                color: 0x9a9a9a,
-                metalness: 0.65,
-                roughness: 0.4
-            });
-            guardrailPostMaterial = new THREE.MeshStandardMaterial({
-                color: 0x777777,
-                metalness: 0.5,
-                roughness: 0.5
-            });
-            guardrailGeometry = new THREE.BoxGeometry(1, 0.18, 0.18);
-            guardrailPostGeometry = new THREE.BoxGeometry(0.12, 0.9, 0.12);
         }
 
         function createRoad() {
@@ -1148,185 +975,59 @@
                 roughness: 0.6,
                 metalness: 0.2
             });
-            bermMaterial = new THREE.MeshStandardMaterial({ color: 0x927c50, roughness: 1 });
-            edgeLineMaterial = new THREE.MeshBasicMaterial({ color: 0xe2e8f0 });
             centerLineMaterial = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
             roadMesh = new THREE.Mesh(new THREE.BufferGeometry(), roadMaterial);
             centerLineMesh = new THREE.Mesh(new THREE.BufferGeometry(), centerLineMaterial);
             roadMesh.receiveShadow = true;
             roadMesh.frustumCulled = false;
             centerLineMesh.frustumCulled = false;
-            bermMeshes = [-1, 1].map(() => {
-                const mesh = new THREE.Mesh(new THREE.BufferGeometry(), bermMaterial);
-                mesh.receiveShadow = true;
-                mesh.frustumCulled = false;
-                scene.add(mesh);
-                return mesh;
-            });
-            edgeLineMeshes = [-1, 1].map(() => {
-                const mesh = new THREE.Mesh(new THREE.BufferGeometry(), edgeLineMaterial);
-                mesh.frustumCulled = false;
-                scene.add(mesh);
-                return mesh;
-            });
             scene.add(roadMesh, centerLineMesh);
             updateRoadMesh(0);
         }
 
         function createEducationalObjects() {
-            treeGeometry = new THREE.ConeGeometry(1, 2, 9);
-            trunkGeometry = new THREE.CylinderGeometry(0.22, 0.38, 4, 7);
-            broadleafGeometry = new THREE.SphereGeometry(1, 9, 7);
-            pineGeometry = new THREE.ConeGeometry(1, 2, 8);
-            bushGeometry = new THREE.IcosahedronGeometry(1, 1);
-            treeMaterial = new THREE.MeshStandardMaterial({ color: 0x466c36, roughness: 1 });
-            trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x59432b, roughness: 1 });
-            broadleafMaterial = new THREE.MeshStandardMaterial({ color: 0x77954c, roughness: 1 });
-            pineMaterial = new THREE.MeshStandardMaterial({ color: 0x214b35, roughness: 1 });
-            bushMaterial = new THREE.MeshStandardMaterial({ color: 0x668746, roughness: 1 });
+            treeGeometry = new THREE.ConeGeometry(3, 8, 5);
+            trunkGeometry = new THREE.CylinderGeometry(0.5, 0.7, 3, 5);
+            treeMaterial = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.9 });
+            trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x78350f });
         }
 
         function createChunkTrees(chunkX, chunkZ, chunkGroup) {
-            const capacity = 28;
-            const broadleaves = new THREE.InstancedMesh(broadleafGeometry, broadleafMaterial, capacity);
-            const pines = new THREE.InstancedMesh(pineGeometry, pineMaterial, capacity * 3);
-            const trunks = new THREE.InstancedMesh(trunkGeometry, trunkMaterial, capacity);
-            const bushes = new THREE.InstancedMesh(bushGeometry, bushMaterial, 42);
+            const leaves = new THREE.InstancedMesh(treeGeometry, treeMaterial, 8);
+            const trunks = new THREE.InstancedMesh(trunkGeometry, trunkMaterial, 8);
             const matrix = new THREE.Matrix4();
             const position = new THREE.Vector3();
-            const scale = new THREE.Vector3();
+            const scale = new THREE.Vector3(1, 1, 1);
             const quaternion = new THREE.Quaternion();
-            let broadleafCount = 0;
-            let pineCount = 0;
-            let trunkCount = 0;
-            let bushCount = 0;
+            let count = 0;
 
-            for (let i = 0; i < capacity; i++) {
-                const seedX = chunkX * 177 + i * 31 + 7;
-                const seedZ = chunkZ * 223 + i * 13 + 11;
+            for (let i = 0; i < 8; i++) {
+                const seedX = chunkX * 17 + i * 31 + 7;
+                const seedZ = chunkZ * 23 + i * 13 + 11;
                 const localX = (hashNoise(seedX, seedZ) * 0.5 + 0.5) * CHUNK_SIZE;
                 const localZ = (hashNoise(seedZ, seedX) * 0.5 + 0.5) * CHUNK_SIZE;
                 const worldX = chunkX * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localX;
                 const worldZ = chunkZ * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localZ;
-                if (Math.abs(worldX - getRoadX(worldZ)) < 25 || getLakeAt(worldX, worldZ)) continue;
-                if (hashNoise(seedX + 19, seedZ) < -0.22) continue;
+                if (Math.abs(worldX - getRoadX(worldZ)) < 18) continue;
 
                 const groundY = getTerrainHeight(worldX, worldZ);
-                const localGroundX = localX - CHUNK_SIZE * 0.5;
-                const localGroundZ = localZ - CHUNK_SIZE * 0.5;
-                const isPine = hashNoise(seedZ, seedX + 53) > 0.12;
-                const size = 0.75 + (hashNoise(seedX + 7, seedZ + 9) + 1) * 0.55;
-                if (isPine) {
-                    for (let tier = 0; tier < 3; tier++) {
-                        position.set(localGroundX, groundY + 3.1 + tier * 1.35, localGroundZ);
-                        scale.set(2.3 * size * (1 - tier * 0.2), 2.1 * size, 2.3 * size * (1 - tier * 0.2));
-                        matrix.compose(position, quaternion, scale);
-                        pines.setMatrixAt(pineCount++, matrix);
-                    }
-                } else {
-                    position.set(localGroundX, groundY + 5.4 * size, localGroundZ);
-                    scale.set(2.35 * size, 2.7 * size, 2.25 * size);
-                    matrix.compose(position, quaternion, scale);
-                    broadleaves.setMatrixAt(broadleafCount++, matrix);
-                }
-                position.set(localGroundX, groundY + 1.9, localGroundZ);
-                scale.set(0.34 * size, 1.05 * size, 0.34 * size);
+                position.set(localX - CHUNK_SIZE * 0.5, groundY + 5.5, localZ - CHUNK_SIZE * 0.5);
                 matrix.compose(position, quaternion, scale);
-                trunks.setMatrixAt(trunkCount++, matrix);
+                leaves.setMatrixAt(count, matrix);
+                position.y = groundY + 1.5;
+                matrix.compose(position, quaternion, scale);
+                trunks.setMatrixAt(count, matrix);
+                count++;
             }
 
-            for (let i = 0; i < 42; i++) {
-                const seedX = chunkX * 311 + i * 41 + 3;
-                const seedZ = chunkZ * 197 + i * 29 + 5;
-                const localX = (hashNoise(seedX, seedZ) * 0.5 + 0.5) * CHUNK_SIZE;
-                const localZ = (hashNoise(seedZ, seedX) * 0.5 + 0.5) * CHUNK_SIZE;
-                const worldX = chunkX * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localX;
-                const worldZ = chunkZ * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localZ;
-                if (Math.abs(worldX - getRoadX(worldZ)) < 19 || getLakeAt(worldX, worldZ)) continue;
-                if (hashNoise(seedZ + 31, seedX) < 0) continue;
-                const groundY = getTerrainHeight(worldX, worldZ);
-                position.set(localX - CHUNK_SIZE * 0.5, groundY + 0.7, localZ - CHUNK_SIZE * 0.5);
-                const radius = 0.7 + Math.abs(hashNoise(seedX + 17, seedZ)) * 1.2;
-                scale.set(radius * 1.3, radius * 0.8, radius);
-                matrix.compose(position, quaternion, scale);
-                bushes.setMatrixAt(bushCount++, matrix);
-            }
-
-            broadleaves.count = broadleafCount;
-            pines.count = pineCount;
-            trunks.count = trunkCount;
-            bushes.count = bushCount;
-            broadleaves.castShadow = true;
-            pines.castShadow = true;
-            chunkGroup.add(broadleaves, pines, trunks, bushes);
-        }
-
-        function createChunkGuardrails(chunkZ, chunkGroup) {
-            const firstSection = Math.floor((chunkZ * CHUNK_SIZE - CHUNK_SIZE * 0.5) / 20);
-            const lastSection = Math.ceil((chunkZ * CHUNK_SIZE + CHUNK_SIZE * 0.5) / 20);
-            const rail = new THREE.InstancedMesh(guardrailGeometry, guardrailMaterial, 12);
-            const posts = new THREE.InstancedMesh(guardrailPostGeometry, guardrailPostMaterial, 72);
-            const matrix = new THREE.Matrix4();
-            const position = new THREE.Vector3();
-            const scale = new THREE.Vector3();
-            const quaternion = new THREE.Quaternion();
-            const up = new THREE.Vector3(0, 1, 0);
-            let railCount = 0;
-            let postCount = 0;
-
-            for (let section = firstSection; section <= lastSection; section++) {
-                if (random01(section + 1400) < 0.38) continue;
-                const z0 = section * 20;
-                const z1 = z0 + 20;
-                const middleZ = (z0 + z1) * 0.5;
-                if (Math.floor((middleZ + CHUNK_SIZE * 0.5) / CHUNK_SIZE) !== chunkZ) continue;
-
-                const side = random01(section + 1800) < 0.5 ? -1 : 1;
-                const offset = side * (ROAD_WIDTH * 0.5 + BERM_WIDTH + 1.4);
-                const x0 = roadCenterX(z0) + offset;
-                const x1 = roadCenterX(z1) + offset;
-                const dx = x1 - x0;
-                const dz = z1 - z0;
-                const length = Math.hypot(dx, dz);
-                const yaw = Math.atan2(-dz, dx);
-                const middleX = (x0 + x1) * 0.5;
-                const groundY = getTerrainHeight(middleX, middleZ);
-                if (getLakeAt(middleX, middleZ)) continue;
-
-                position.set(middleX, groundY + 1.05, middleZ);
-                scale.set(length, 1, 1);
-                quaternion.setFromAxisAngle(up, yaw);
-                matrix.compose(position, quaternion, scale);
-                rail.setMatrixAt(railCount++, matrix);
-
-                for (let p = 0; p <= 5; p++) {
-                    const t = p / 5;
-                    const x = x0 + dx * t;
-                    const z = z0 + dz * t;
-                    position.set(x, getTerrainHeight(x, z) + 0.45, z);
-                    scale.set(1, 1, 1);
-                    quaternion.identity();
-                    matrix.compose(position, quaternion, scale);
-                    posts.setMatrixAt(postCount++, matrix);
-                }
-            }
-
-            rail.count = railCount;
-            posts.count = postCount;
-            rail.castShadow = true;
-            posts.castShadow = true;
-            chunkGroup.add(rail, posts);
-        }
-
-        function disposeTerrainChunk(chunk) {
-            scene.remove(chunk);
-            chunk.traverse((object) => {
-                if (object.isMesh && !object.isInstancedMesh) object.geometry.dispose();
-            });
+            leaves.count = count;
+            trunks.count = count;
+            leaves.castShadow = true;
+            chunkGroup.add(leaves, trunks);
         }
 
         function createTerrainChunk(chunkX, chunkZ, lod) {
-            const segments = lod === 0 ? 32 : (lod === 1 ? 16 : 8);
+            const segments = lod === 0 ? 32 : 16;
             const geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segments, segments);
             geometry.rotateX(-Math.PI / 2);
             const positions = geometry.attributes.position;
@@ -1339,20 +1040,6 @@
                 positions.setY(i, getTerrainHeight(worldX, worldZ));
             }
             geometry.computeVertexNormals();
-            const colors = [];
-            const meadowLow = new THREE.Color(0x587b3e);
-            const meadowHigh = new THREE.Color(0x91a666);
-            const grassColor = new THREE.Color();
-            for (let i = 0; i < positions.count; i++) {
-                const worldX = originX + positions.getX(i);
-                const worldZ = originZ + positions.getZ(i);
-                const heightBlend = THREE.MathUtils.smoothstep(positions.getY(i), 4, 32);
-                const variation = noise2D(worldX * 0.035, worldZ * 0.035) * 0.055;
-                grassColor.copy(meadowLow).lerp(meadowHigh, heightBlend);
-                grassColor.multiplyScalar(1 + variation);
-                colors.push(grassColor.r, grassColor.g, grassColor.b);
-            }
-            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
             const group = new THREE.Group();
             group.position.set(originX, 0, originZ);
@@ -1360,7 +1047,6 @@
             mesh.receiveShadow = true;
             group.add(mesh);
             createChunkTrees(chunkX, chunkZ, group);
-            createChunkGuardrails(chunkZ, group);
             group.userData.lod = lod;
             scene.add(group);
             return group;
@@ -1376,13 +1062,19 @@
                     const x = centerX + dx;
                     const z = centerZ + dz;
                     const key = `${x},${z}`;
-                    const distance = Math.max(Math.abs(dx), Math.abs(dz));
-                    const lod = distance === CHUNK_RADIUS ? 2 : (distance === CHUNK_RADIUS - 1 ? 1 : 0);
+                    const lod = Math.max(Math.abs(dx), Math.abs(dz)) === CHUNK_RADIUS ? 1 : 0;
                     required.add(key);
 
                     const existing = worldChunks.get(key);
                     if (!existing || existing.userData.lod !== lod) {
-                        if (existing) disposeTerrainChunk(existing);
+                        if (existing) {
+                            scene.remove(existing);
+                            existing.traverse((object) => {
+                                if (object.geometry && object.geometry !== treeGeometry && object.geometry !== trunkGeometry) {
+                                    object.geometry.dispose();
+                                }
+                            });
+                        }
                         worldChunks.set(key, createTerrainChunk(x, z, lod));
                     }
                 }
@@ -1390,63 +1082,18 @@
 
             for (const [key, chunk] of worldChunks) {
                 if (!required.has(key)) {
-                    disposeTerrainChunk(chunk);
+                    scene.remove(chunk);
+                    chunk.traverse((object) => {
+                        if (object.geometry && object.geometry !== treeGeometry && object.geometry !== trunkGeometry) {
+                            object.geometry.dispose();
+                        }
+                    });
                     worldChunks.delete(key);
                 }
             }
-            updateWorldLakes(centerZ);
         }
 
-        function createLakeMesh(lake) {
-            const segments = 96;
-            const positions = [0, 0, 0];
-            const indices = [];
-            for (let i = 0; i <= segments; i++) {
-                const angle = i / segments * Math.PI * 2;
-                const variation = 1 + noise1D(lake.band * 11 + i * 0.13) * 0.045;
-                positions.push(
-                    Math.cos(angle) * lake.radiusX * 0.79 * variation,
-                    0,
-                    Math.sin(angle) * lake.radiusZ * 0.79 * variation
-                );
-                if (i < segments) indices.push(0, i + 2, i + 1);
-            }
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-            geometry.setIndex(indices);
-            geometry.computeVertexNormals();
-            const mesh = new THREE.Mesh(geometry, lakeMaterial);
-            mesh.position.set(lake.centerX, lake.waterY, lake.centerZ);
-            mesh.renderOrder = 1;
-            mesh.frustumCulled = false;
-            return mesh;
-        }
-
-        function updateWorldLakes(centerChunkZ) {
-            const centerZ = centerChunkZ * CHUNK_SIZE;
-            const firstBand = Math.floor((centerZ - CHUNK_SIZE * (CHUNK_RADIUS + 1)) / 1050);
-            const lastBand = Math.ceil((centerZ + CHUNK_SIZE * (CHUNK_RADIUS + 1)) / 1050);
-            const required = new Set();
-            for (let band = firstBand; band <= lastBand; band++) {
-                const key = String(band);
-                required.add(key);
-                if (!worldLakes.has(key)) {
-                    const lake = getLakeForBand(band);
-                    const mesh = createLakeMesh(lake);
-                    scene.add(mesh);
-                    worldLakes.set(key, mesh);
-                }
-            }
-            for (const [key, mesh] of worldLakes) {
-                if (!required.has(key)) {
-                    scene.remove(mesh);
-                    mesh.geometry.dispose();
-                    worldLakes.delete(key);
-                }
-            }
-        }
-
-        function buildStripGeometry(startZ, endZ, width, sampleCount, lateralOffset = 0, heightOffset = 0.16) {
+        function buildStripGeometry(startZ, endZ, width, sampleCount) {
             const vertices = [];
             const indices = [];
             for (let i = 0; i <= sampleCount; i++) {
@@ -1457,14 +1104,9 @@
                 const normalLength = Math.sqrt(1 + dx * dx);
                 const nx = 1 / normalLength;
                 const nz = dx / normalLength;
-                const centerX = x + nx * lateralOffset;
-                const centerZ = z + nz * lateralOffset;
-                const leftX = centerX + nx * width * 0.5;
-                const leftZ = centerZ + nz * width * 0.5;
-                const rightX = centerX - nx * width * 0.5;
-                const rightZ = centerZ - nz * width * 0.5;
-                vertices.push(leftX, getTerrainHeight(leftX, leftZ) + heightOffset, leftZ);
-                vertices.push(rightX, getTerrainHeight(rightX, rightZ) + heightOffset, rightZ);
+                const y = getRoadHeight(z) + 0.16;
+                vertices.push(x + nx * width * 0.5, y, z + nz * width * 0.5);
+                vertices.push(x - nx * width * 0.5, y, z - nz * width * 0.5);
                 if (i < sampleCount) {
                     const a = i * 2;
                     indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
@@ -1483,23 +1125,12 @@
             if (lastRoadWindow === windowIndex) return;
             lastRoadWindow = windowIndex;
 
-            const startZ = worldZ + WORLD_SIZE;
-            const endZ = worldZ - WORLD_SIZE * 2;
+            const startZ = worldZ + 1000;
+            const endZ = worldZ - 2000;
             roadMesh.geometry.dispose();
             centerLineMesh.geometry.dispose();
-            roadMesh.geometry = buildStripGeometry(startZ, endZ, ROAD_WIDTH, 300, 0, 0.16);
-            centerLineMesh.geometry = buildStripGeometry(startZ, endZ, 0.25, 300, 0, 0.21);
-            bermMeshes.forEach((mesh, index) => {
-                mesh.geometry.dispose();
-                const side = index === 0 ? -1 : 1;
-                const offset = side * (ROAD_WIDTH * 0.5 + BERM_WIDTH * 0.5);
-                mesh.geometry = buildStripGeometry(startZ, endZ, BERM_WIDTH, 300, offset, 0.08);
-            });
-            edgeLineMeshes.forEach((mesh, index) => {
-                mesh.geometry.dispose();
-                const side = index === 0 ? -1 : 1;
-                mesh.geometry = buildStripGeometry(startZ, endZ, 0.18, 300, side * (ROAD_WIDTH * 0.5 - 0.15), 0.19);
-            });
+            roadMesh.geometry = buildStripGeometry(startZ, endZ, ROAD_WIDTH, 300);
+            centerLineMesh.geometry = buildStripGeometry(startZ, endZ, 0.25, 300);
         }
 
         function selectCar(type) {
