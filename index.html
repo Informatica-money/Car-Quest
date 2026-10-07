@@ -241,6 +241,10 @@
                     <i id="audio-icon" class="fa-solid fa-volume-high text-lg"></i>
                     <span id="audio-status" class="hidden sm:inline">Geluid Aan</span>
                 </button>
+                <button onclick="resetCar()" class="glass-panel rounded-2xl p-4 text-white hover:text-amber-300 pointer-events-auto flex items-center gap-2 text-sm font-bold shadow-xl transition-all" title="Auto terugzetten (R)">
+                    <i class="fa-solid fa-rotate-left"></i>
+                    <span class="hidden sm:inline">Reset</span>
+                </button>
 
                 <div class="glass-panel rounded-2xl p-4 w-52 md:w-64 space-y-2 pointer-events-auto shadow-xl">
                     <div class="flex justify-between text-xs font-semibold">
@@ -265,6 +269,7 @@
                 <div><span class="px-1.5 py-0.5 bg-slate-700/80 rounded text-white font-mono">S</span> / <span class="px-1.5 py-0.5 bg-slate-700/80 rounded text-white font-mono">↓</span> Remmen / Achteruit</div>
                 <div><span class="px-1.5 py-0.5 bg-slate-700/80 rounded text-white font-mono">A</span> / <span class="px-1.5 py-0.5 bg-slate-700/80 rounded text-white font-mono">D</span> Sturen</div>
                 <div><span class="px-1.5 py-0.5 bg-slate-700/80 rounded text-white font-mono">C</span> Camera Wisselen</div>
+                <div><span class="px-1.5 py-0.5 bg-slate-700/80 rounded text-white font-mono">R</span> Auto Resetten</div>
             </div>
 
             <!-- Speedometer & RPM Telemetry -->
@@ -326,6 +331,7 @@
                 audio: {
                     oscType: 'sawtooth',
                     subType: 'sine',
+                    cylinders: 4,
                     pitchMult: 1.0,
                     filterQ: 1.0,
                     filterBase: 180,
@@ -346,6 +352,7 @@
                 audio: {
                     oscType: 'sine',
                     subType: 'triangle',
+                    cylinders: 0,
                     pitchMult: 2.2,
                     filterQ: 5.0,
                     filterBase: 500,
@@ -367,6 +374,7 @@
                 audio: {
                     oscType: 'triangle',
                     subType: 'sawtooth',
+                    cylinders: 6,
                     pitchMult: 0.9,
                     filterQ: 2.5,
                     filterBase: 220,
@@ -387,6 +395,7 @@
                 audio: {
                     oscType: 'sawtooth',
                     subType: 'sawtooth',
+                    cylinders: 8,
                     pitchMult: 0.65,
                     filterQ: 1.2,
                     filterBase: 100,
@@ -408,6 +417,7 @@
                 audio: {
                     oscType: 'square',
                     subType: 'sine',
+                    cylinders: 4,
                     pitchMult: 0.55,
                     filterQ: 1.0,
                     filterBase: 130,
@@ -460,47 +470,72 @@
         // Audio Synthesizer State
         let audioCtx = null;
         let isAudioMuted = false;
+        let masterGain = null;
         let engineOsc = null;
+        let harmonicOsc = null;
+        let harmonicGain = null;
         let engineGain = null;
         let engineFilter = null;
         let subOsc = null;
         let subGain = null;
         let lfoOsc = null;
         let lfoGain = null;
+        let roadNoiseSource = null;
+        let roadNoiseFilter = null;
+        let roadNoiseGain = null;
 
         function initAudioEngine() {
             if (audioCtx) return;
             try {
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
                 audioCtx = new AudioContext();
+                masterGain = audioCtx.createGain();
+                masterGain.gain.setValueAtTime(isAudioMuted ? 0 : 0.7, audioCtx.currentTime);
+                masterGain.connect(audioCtx.destination);
 
-                // Main Engine Oscillator
                 engineOsc = audioCtx.createOscillator();
                 engineOsc.type = 'sawtooth';
-                
                 engineFilter = audioCtx.createBiquadFilter();
                 engineFilter.type = 'lowpass';
-                engineFilter.frequency.setValueAtTime(180, audioCtx.currentTime);
-
+                engineFilter.frequency.setValueAtTime(650, audioCtx.currentTime);
                 engineGain = audioCtx.createGain();
-                engineGain.gain.setValueAtTime(0.08, audioCtx.currentTime);
-
+                engineGain.gain.setValueAtTime(0.025, audioCtx.currentTime);
                 engineOsc.connect(engineFilter);
                 engineFilter.connect(engineGain);
-                engineGain.connect(audioCtx.destination);
+                engineGain.connect(masterGain);
                 engineOsc.start();
 
-                // Sub Oscillator (for EV Whine or V8 Bass or Engine Rumble)
+                harmonicOsc = audioCtx.createOscillator();
+                harmonicOsc.type = 'triangle';
+                harmonicGain = audioCtx.createGain();
+                harmonicGain.gain.setValueAtTime(0.018, audioCtx.currentTime);
+                harmonicOsc.connect(harmonicGain);
+                harmonicGain.connect(engineFilter);
+                harmonicOsc.start();
+
                 subOsc = audioCtx.createOscillator();
                 subOsc.type = 'sine';
-                
                 subGain = audioCtx.createGain();
-                subGain.gain.setValueAtTime(0.02, audioCtx.currentTime);
-
-                subOsc.connect(audioCtx.destination);
+                subGain.gain.setValueAtTime(0.01, audioCtx.currentTime);
+                subOsc.connect(subGain);
+                subGain.connect(engineFilter);
                 subOsc.start();
 
-                // LFO Oscillator (for Camper "Chug-Chug" rhythm)
+                const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
+                const noiseData = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < noiseData.length; i++) noiseData[i] = Math.random() * 2 - 1;
+                roadNoiseSource = audioCtx.createBufferSource();
+                roadNoiseSource.buffer = noiseBuffer;
+                roadNoiseSource.loop = true;
+                roadNoiseFilter = audioCtx.createBiquadFilter();
+                roadNoiseFilter.type = 'lowpass';
+                roadNoiseGain = audioCtx.createGain();
+                roadNoiseGain.gain.setValueAtTime(0, audioCtx.currentTime);
+                roadNoiseSource.connect(roadNoiseFilter);
+                roadNoiseFilter.connect(roadNoiseGain);
+                roadNoiseGain.connect(masterGain);
+                roadNoiseSource.start();
+
                 lfoOsc = audioCtx.createOscillator();
                 lfoOsc.type = 'sine';
                 lfoOsc.frequency.setValueAtTime(8, audioCtx.currentTime);
@@ -525,6 +560,7 @@
             if (engineOsc) engineOsc.type = a.oscType;
             if (subOsc) subOsc.type = a.subType;
             if (engineFilter) engineFilter.Q.setValueAtTime(a.filterQ, audioCtx.currentTime);
+            if (harmonicGain) harmonicGain.gain.setTargetAtTime(a.isEV ? 0.008 : 0.02, audioCtx.currentTime, 0.1);
         }
 
         function toggleAudioMute() {
@@ -535,59 +571,48 @@
             if (isAudioMuted) {
                 icon.className = 'fa-solid fa-volume-xmark text-rose-400';
                 statusText.innerText = 'Geluid Uit';
-                if (engineGain) engineGain.gain.setValueAtTime(0, audioCtx.currentTime);
-                if (subGain) subGain.gain.setValueAtTime(0, audioCtx.currentTime);
+                if (masterGain) masterGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.025);
             } else {
                 icon.className = 'fa-solid fa-volume-high text-emerald-400';
                 statusText.innerText = 'Geluid Aan';
+                if (masterGain) masterGain.gain.setTargetAtTime(0.7, audioCtx.currentTime, 0.025);
             }
         }
 
         function updateAudioEngine(rpm, speedKmH, isAccelerating) {
-            if (!audioCtx || isAudioMuted) return;
+            if (!audioCtx) return;
             if (audioCtx.state === 'suspended') {
                 audioCtx.resume();
             }
 
             const profile = CAR_PROFILES[selectedCarType] || CAR_PROFILES.hatchback;
             const a = profile.audio;
+            const now = audioCtx.currentTime;
+            const normalizedRpm = THREE.MathUtils.clamp(rpm / 6500, 0, 1);
+            const crankHz = Math.max(13, rpm / 60);
+            const firingHz = Math.max(18, crankHz * Math.max(1, a.cylinders || 4) * 0.5);
+            const targetFreq = a.isEV
+                ? 100 + Math.abs(speedKmH) * 2.3 + normalizedRpm * 170
+                : firingHz * a.pitchMult;
 
-            // Pitch mapped specifically per vehicle audio config
-            let targetFreq = Math.max(30, (rpm / 6500) * 150 * a.pitchMult + 30);
-            
-            // Special EV Whine Frequency Boost
-            if (a.isEV) {
-                targetFreq = 200 + (Math.abs(speedKmH) * 18) + (rpm / 6500) * 600;
-            }
+            engineOsc.frequency.setTargetAtTime(targetFreq, now, 0.06);
+            harmonicOsc.frequency.setTargetAtTime(Math.min(1200, targetFreq * 2.01), now, 0.08);
+            subOsc.frequency.setTargetAtTime(Math.max(24, crankHz * 0.5), now, 0.08);
 
-            engineOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.05);
+            const filterCutoff = Math.max(a.filterBase, normalizedRpm * a.filterScale + Math.abs(speedKmH) * 3);
+            engineFilter.frequency.setTargetAtTime(filterCutoff, now, 0.09);
+            engineGain.gain.setTargetAtTime(isAccelerating ? 0.07 : 0.032, now, 0.12);
+            subGain.gain.setTargetAtTime(a.subGainVal * (isAccelerating ? 1.25 : 0.55), now, 0.12);
+            roadNoiseFilter.frequency.setTargetAtTime(450 + Math.abs(speedKmH) * 18, now, 0.15);
+            roadNoiseGain.gain.setTargetAtTime(Math.min(0.16, Math.abs(speedKmH) / 1300), now, 0.2);
 
-            // Filter Cutoff scaled per vehicle audio config
-            const filterCutoff = Math.max(a.filterBase, (rpm / 6500) * a.filterScale + (Math.abs(speedKmH) * 6));
-            engineFilter.frequency.setTargetAtTime(filterCutoff, audioCtx.currentTime, 0.08);
-
-            // Engine Gain
-            const targetGain = isAccelerating ? 0.12 : 0.05;
-            engineGain.gain.setTargetAtTime(targetGain, audioCtx.currentTime, 0.1);
-
-            // Sub-Oscillator (V8 sub-bass or EV secondary harmonic whine)
-            if (subGain) {
-                let subFreq = targetFreq * 0.5;
-                if (a.isEV) subFreq = targetFreq * 1.5; // High EV harmonic
-                
-                subOsc.frequency.setTargetAtTime(subFreq, audioCtx.currentTime, 0.05);
-                const subVolume = isAccelerating ? a.subGainVal * 1.5 : a.subGainVal;
-                subGain.gain.setTargetAtTime(subVolume, audioCtx.currentTime, 0.1);
-            }
-
-            // LFO pulse for Camper "Chug-Chug" engine rhythm
             if (lfoGain && lfoOsc) {
                 if (a.hasPulse) {
-                    const pulseSpeed = Math.max(4, (rpm / 6500) * 22);
-                    lfoOsc.frequency.setTargetAtTime(pulseSpeed, audioCtx.currentTime, 0.05);
-                    lfoGain.gain.setTargetAtTime(isAccelerating ? 0.04 : 0.02, audioCtx.currentTime, 0.1);
+                    const pulseSpeed = Math.max(4, crankHz * 0.5);
+                    lfoOsc.frequency.setTargetAtTime(pulseSpeed, now, 0.05);
+                    lfoGain.gain.setTargetAtTime(isAccelerating ? 0.018 : 0.008, now, 0.1);
                 } else {
-                    lfoGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
+                    lfoGain.gain.setTargetAtTime(0, now, 0.1);
                 }
             }
         }
@@ -601,7 +626,7 @@
             const gain = audioCtx.createGain();
 
             osc.connect(gain);
-            gain.connect(audioCtx.destination);
+            gain.connect(masterGain);
 
             if (success) {
                 // Happy ascending chord chime (+20% fuel)
@@ -631,19 +656,34 @@
             }
         }
 
+        function playCollisionSound() {
+            if (!audioCtx || isAudioMuted) return;
+            const now = audioCtx.currentTime;
+            const oscillator = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            oscillator.type = 'triangle';
+            oscillator.frequency.setValueAtTime(95, now);
+            oscillator.frequency.exponentialRampToValueAtTime(38, now + 0.16);
+            gain.gain.setValueAtTime(0.16, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+            oscillator.connect(gain);
+            gain.connect(masterGain);
+            oscillator.start(now);
+            oscillator.stop(now + 0.21);
+        }
+
         // Core 3D State
         let scene, camera, renderer;
         let car, carModelGroup;
         let wheels = [];
-        let roadMesh, centerLineMesh;
         const WORLD_SEED = 20261007;
         const CHUNK_SIZE = 200;
         const CHUNK_RADIUS = 2;
-        const ROAD_WIDTH = 12;
         const worldChunks = new Map();
-        let terrainMaterial, roadMaterial, centerLineMaterial;
+        let terrainMaterial;
         let treeGeometry, trunkGeometry, treeMaterial, trunkMaterial;
-        let lastRoadWindow = null;
+        const SPAWN_POSITION = new THREE.Vector3(0, 0, 0);
+        let lastCollisionSoundTime = 0;
         let gameStarted = false;
         let selectedCarType = 'hatchback';
         let cameraMode = 0; // 0 = 3rd Person (Locked), 1 = Cockpit
@@ -676,7 +716,8 @@
             steerSpeed: 0.003,
             fuelBurnRate: 1.0,
             pitchOffset: 0,
-            rollOffset: 0
+            rollOffset: 0,
+            surfacePitch: 0
         };
 
         function initScene() {
@@ -718,7 +759,6 @@
 
             // Create World Meshes
             createTerrain();
-            createRoad();
             
             // Create Root Car Container
             car = new THREE.Group();
@@ -728,6 +768,9 @@
             buildDetailedCarMesh(selectedCarType);
 
             createEducationalObjects();
+            car.position.copy(SPAWN_POSITION);
+            car.position.y = getTerrainHeight(car.position.x, car.position.z) + 0.1;
+            updateWorldChunks();
 
             setupInputListeners();
             window.addEventListener('resize', onWindowResize);
@@ -939,26 +982,8 @@
                 + noise2D(x * 0.015, z * 0.015) * 2.5;
         }
 
-        function getRoadX(z) {
-            // Since x is a function of z, the centerline cannot cross itself.
-            return noise1D(z / 260) * 42 + noise1D(z / 780 + 31.7) * 18;
-        }
-
-        function getRoadHeight(z) {
-            const x = getRoadX(z);
-            return noise2D(x * 0.00055, z * 0.00055) * 18
-                + noise2D(x * 0.0014, z * 0.0014) * 5;
-        }
-
         function getTerrainHeight(x, z) {
-            const terrain = getRawTerrainHeight(x, z);
-            const roadX = getRoadX(z);
-            const distance = Math.abs(x - roadX);
-            if (distance >= 19) return terrain;
-
-            const roadHeight = getRoadHeight(z);
-            const blend = THREE.MathUtils.smoothstep(distance, ROAD_WIDTH * 0.5, 19);
-            return THREE.MathUtils.lerp(roadHeight, terrain, blend);
+            return getRawTerrainHeight(x, z);
         }
 
         function createTerrain() {
@@ -967,22 +992,6 @@
                 roughness: 0.9,
                 metalness: 0.1
             });
-        }
-
-        function createRoad() {
-            roadMaterial = new THREE.MeshStandardMaterial({
-                color: 0x334155,
-                roughness: 0.6,
-                metalness: 0.2
-            });
-            centerLineMaterial = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
-            roadMesh = new THREE.Mesh(new THREE.BufferGeometry(), roadMaterial);
-            centerLineMesh = new THREE.Mesh(new THREE.BufferGeometry(), centerLineMaterial);
-            roadMesh.receiveShadow = true;
-            roadMesh.frustumCulled = false;
-            centerLineMesh.frustumCulled = false;
-            scene.add(roadMesh, centerLineMesh);
-            updateRoadMesh(0);
         }
 
         function createEducationalObjects() {
@@ -999,6 +1008,7 @@
             const position = new THREE.Vector3();
             const scale = new THREE.Vector3(1, 1, 1);
             const quaternion = new THREE.Quaternion();
+            const colliders = [];
             let count = 0;
 
             for (let i = 0; i < 8; i++) {
@@ -1008,8 +1018,7 @@
                 const localZ = (hashNoise(seedZ, seedX) * 0.5 + 0.5) * CHUNK_SIZE;
                 const worldX = chunkX * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localX;
                 const worldZ = chunkZ * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localZ;
-                if (Math.abs(worldX - getRoadX(worldZ)) < 18) continue;
-
+                if (Math.hypot(worldX - SPAWN_POSITION.x, worldZ - SPAWN_POSITION.z) < 9) continue;
                 const groundY = getTerrainHeight(worldX, worldZ);
                 position.set(localX - CHUNK_SIZE * 0.5, groundY + 5.5, localZ - CHUNK_SIZE * 0.5);
                 matrix.compose(position, quaternion, scale);
@@ -1017,6 +1026,7 @@
                 position.y = groundY + 1.5;
                 matrix.compose(position, quaternion, scale);
                 trunks.setMatrixAt(count, matrix);
+                colliders.push({ x: worldX, z: worldZ, radius: 2.4 });
                 count++;
             }
 
@@ -1024,6 +1034,7 @@
             trunks.count = count;
             leaves.castShadow = true;
             chunkGroup.add(leaves, trunks);
+            return colliders;
         }
 
         function createTerrainChunk(chunkX, chunkZ, lod) {
@@ -1046,7 +1057,7 @@
             const mesh = new THREE.Mesh(geometry, terrainMaterial);
             mesh.receiveShadow = true;
             group.add(mesh);
-            createChunkTrees(chunkX, chunkZ, group);
+            group.userData.colliders = createChunkTrees(chunkX, chunkZ, group);
             group.userData.lod = lod;
             scene.add(group);
             return group;
@@ -1093,46 +1104,6 @@
             }
         }
 
-        function buildStripGeometry(startZ, endZ, width, sampleCount) {
-            const vertices = [];
-            const indices = [];
-            for (let i = 0; i <= sampleCount; i++) {
-                const t = i / sampleCount;
-                const z = startZ + (endZ - startZ) * t;
-                const x = getRoadX(z);
-                const dx = (getRoadX(z + 1) - getRoadX(z - 1)) * 0.5;
-                const normalLength = Math.sqrt(1 + dx * dx);
-                const nx = 1 / normalLength;
-                const nz = dx / normalLength;
-                const y = getRoadHeight(z) + 0.16;
-                vertices.push(x + nx * width * 0.5, y, z + nz * width * 0.5);
-                vertices.push(x - nx * width * 0.5, y, z - nz * width * 0.5);
-                if (i < sampleCount) {
-                    const a = i * 2;
-                    indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-                }
-            }
-
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-            geometry.setIndex(indices);
-            geometry.computeVertexNormals();
-            return geometry;
-        }
-
-        function updateRoadMesh(worldZ) {
-            const windowIndex = Math.floor(worldZ / 40);
-            if (lastRoadWindow === windowIndex) return;
-            lastRoadWindow = windowIndex;
-
-            const startZ = worldZ + 1000;
-            const endZ = worldZ - 2000;
-            roadMesh.geometry.dispose();
-            centerLineMesh.geometry.dispose();
-            roadMesh.geometry = buildStripGeometry(startZ, endZ, ROAD_WIDTH, 300);
-            centerLineMesh.geometry = buildStripGeometry(startZ, endZ, 0.25, 300);
-        }
-
         function selectCar(type) {
             initAudioEngine(); // Initialize Web Audio API context
 
@@ -1167,6 +1138,7 @@
                 if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') keys.left = true;
                 if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') keys.right = true;
                 if (e.key === 'c' || e.key === 'C') switchCamera();
+                if (e.key === 'r' || e.key === 'R') resetCar();
             });
 
             window.addEventListener('keyup', (e) => {
@@ -1241,16 +1213,41 @@
                 p.steeringAngle *= 0.82;
             }
 
+            const previousX = car.position.x;
+            const previousZ = car.position.z;
             const turnRate = Math.min(1.2, Math.abs(p.speed) * 0.045 + 0.1);
             car.rotation.y += p.steeringAngle * turnRate;
             car.translateZ(-p.speed * delta * 4);
+            if (collidesWithTree(previousX, previousZ, car.position.x, car.position.z)) {
+                car.position.x = previousX;
+                car.position.z = previousZ;
+                p.speed *= -0.16;
+                const now = performance.now();
+                if (now - lastCollisionSoundTime > 450) {
+                    playCollisionSound();
+                    lastCollisionSoundTime = now;
+                }
+            }
             car.position.y = getTerrainHeight(car.position.x, car.position.z) + 0.1;
 
-            // Pitch & Roll
-            const targetPitch = (accelForce * 0.005);
+            // Sample the ground in front of and behind the car to follow hill slopes.
+            const forwardX = car.position.x - Math.sin(car.rotation.y) * 3;
+            const forwardZ = car.position.z - Math.cos(car.rotation.y) * 3;
+            const rearX = car.position.x + Math.sin(car.rotation.y) * 3;
+            const rearZ = car.position.z + Math.cos(car.rotation.y) * 3;
+            const slopePitch = Math.atan2(
+                getTerrainHeight(forwardX, forwardZ) - getTerrainHeight(rearX, rearZ),
+                6
+            );
+            p.surfacePitch += (THREE.MathUtils.clamp(slopePitch, -0.55, 0.55) - p.surfacePitch)
+                * (1 - Math.exp(-delta * 5));
+            car.rotation.x = p.surfacePitch;
+
+            // Small body movement from acceleration and steering.
+            const targetPitch = accelForce * 0.003;
             const targetRoll = (-p.steeringAngle * p.speed * 0.06);
-            p.pitchOffset += (targetPitch - p.pitchOffset) * 0.1;
-            p.rollOffset += (targetRoll - p.rollOffset) * 0.1;
+            p.pitchOffset += (targetPitch - p.pitchOffset) * (1 - Math.exp(-delta * 6));
+            p.rollOffset += (targetRoll - p.rollOffset) * (1 - Math.exp(-delta * 7));
 
             if (carModelGroup) {
                 carModelGroup.rotation.x = p.pitchOffset;
@@ -1271,6 +1268,53 @@
             if (fuelLevel <= 0 && Math.abs(p.speed) < 0.5 && !isQuizOpen) {
                 openQuizModal();
             }
+        }
+
+        function collidesWithTree(startX, startZ, endX, endZ) {
+            const dx = endX - startX;
+            const dz = endZ - startZ;
+            const segmentLengthSq = dx * dx + dz * dz;
+            const collisionRadius = 1.3;
+
+            for (const chunk of worldChunks.values()) {
+                const obstacles = chunk.userData.colliders || [];
+                for (const obstacle of obstacles) {
+                    const fromStartX = obstacle.x - startX;
+                    const fromStartZ = obstacle.z - startZ;
+                    const t = segmentLengthSq > 0
+                        ? THREE.MathUtils.clamp((fromStartX * dx + fromStartZ * dz) / segmentLengthSq, 0, 1)
+                        : 0;
+                    const nearestX = startX + dx * t;
+                    const nearestZ = startZ + dz * t;
+                    const totalRadius = collisionRadius + obstacle.radius;
+                    if ((obstacle.x - nearestX) ** 2 + (obstacle.z - nearestZ) ** 2 < totalRadius ** 2) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function resetCar() {
+            if (!car) return;
+            car.position.set(SPAWN_POSITION.x, getTerrainHeight(SPAWN_POSITION.x, SPAWN_POSITION.z) + 0.1, SPAWN_POSITION.z);
+            car.rotation.set(0, 0, 0);
+            vehiclePhysics.speed = 0;
+            vehiclePhysics.speedKmH = 0;
+            vehiclePhysics.steeringAngle = 0;
+            vehiclePhysics.currentGear = 1;
+            vehiclePhysics.rpm = 800;
+            vehiclePhysics.pitchOffset = 0;
+            vehiclePhysics.rollOffset = 0;
+            vehiclePhysics.surfacePitch = 0;
+            Object.keys(keys).forEach((key) => { keys[key] = false; });
+            if (carModelGroup) carModelGroup.rotation.set(0, 0, 0);
+            isQuizOpen = false;
+            document.getElementById('quiz-modal').classList.add('hidden');
+            fuelLevel = 100;
+            updateFuel(0);
+            calculateGearAndRpm();
+            updateWorldChunks();
         }
 
         function updateCamera() {
@@ -1417,7 +1461,6 @@
             if (gameStarted) {
                 updatePhysics(delta);
                 updateWorldChunks();
-                updateRoadMesh(car.position.z);
                 updateCamera();
             } else {
                 camera.position.x = Math.sin(now * 0.0005) * 12;
