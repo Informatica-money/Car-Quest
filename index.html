@@ -79,7 +79,7 @@
                     <button class="w-full py-1.5 md:py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs transition-all shadow-md shadow-sky-500/20">Selecteer</button>
                 </div>
 
-                <!-- 2. Elektrische Sportwagen -->
+                <!-- 2. V10 Sportwagen -->
                 <div onclick="selectCar('sportscar')" class="car-card aspect-square flex-1 min-w-[130px] md:min-w-[170px] glass-panel rounded-2xl p-3 md:p-4 border border-white/10 flex flex-col justify-between items-center text-center cursor-pointer group hover:bg-slate-800/80">
                     <div class="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-xl md:text-2xl border border-amber-500/30 mt-1">
                         <i class="fa-solid fa-bolt"></i>
@@ -88,7 +88,7 @@
                         <h3 class="text-xs md:text-base font-bold text-white group-hover:text-amber-400 transition-colors leading-tight">Sportwagen</h3>
                         <p class="text-[10px] md:text-xs text-amber-300/80 font-mono mt-1">220 km/u • 3.8s</p>
                         <span class="inline-block mt-1 text-[9px] md:text-[10px] text-amber-300 font-semibold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
-                            <i class="fa-solid fa-atom text-[8px] mr-1"></i>EV Whine
+                            <i class="fa-solid fa-gauge-high text-[8px] mr-1"></i>V10
                         </span>
                     </div>
                     <button class="w-full py-1.5 md:py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all shadow-md shadow-amber-500/20">Selecteer</button>
@@ -326,6 +326,7 @@
                 audio: {
                     oscType: 'sawtooth',
                     subType: 'sine',
+                    cylinders: 4,
                     pitchMult: 1.0,
                     filterQ: 1.0,
                     filterBase: 180,
@@ -335,23 +336,24 @@
                 }
             },
             sportscar: {
-                name: 'Elektrische Sportwagen',
+                name: 'V10 Sportwagen',
                 maxSpeedKmH: 220,
                 baseAccel: 9.8,
                 steerSpeed: 0.0048,
                 maxSteer: 0.040,
                 fuelBurnRate: 1.1,
                 color: 0xd97706,
-                soundProfileName: 'EV High-Tech Turbine',
+                soundProfileName: 'Hoogtoerige V10',
                 audio: {
-                    oscType: 'sine',
+                    oscType: 'sawtooth',
                     subType: 'triangle',
-                    pitchMult: 2.2,
-                    filterQ: 5.0,
-                    filterBase: 500,
-                    filterScale: 3800,
-                    subGainVal: 0.08,
-                    isEV: true,
+                    cylinders: 10,
+                    pitchMult: 1.2,
+                    filterQ: 1.8,
+                    filterBase: 180,
+                    filterScale: 2600,
+                    subGainVal: 0.035,
+                    intakeGain: 0.35,
                     hasPulse: false
                 }
             },
@@ -367,6 +369,7 @@
                 audio: {
                     oscType: 'triangle',
                     subType: 'sawtooth',
+                    cylinders: 6,
                     pitchMult: 0.9,
                     filterQ: 2.5,
                     filterBase: 220,
@@ -387,6 +390,7 @@
                 audio: {
                     oscType: 'sawtooth',
                     subType: 'sawtooth',
+                    cylinders: 8,
                     pitchMult: 0.65,
                     filterQ: 1.2,
                     filterBase: 100,
@@ -408,6 +412,7 @@
                 audio: {
                     oscType: 'square',
                     subType: 'sine',
+                    cylinders: 4,
                     pitchMult: 0.55,
                     filterQ: 1.0,
                     filterBase: 130,
@@ -461,12 +466,16 @@
         let audioCtx = null;
         let isAudioMuted = false;
         let engineOsc = null;
+        let engineHarmonicOsc = null;
         let engineGain = null;
         let engineFilter = null;
         let subOsc = null;
         let subGain = null;
         let lfoOsc = null;
         let lfoGain = null;
+        let windSource = null;
+        let windFilter = null;
+        let windGain = null;
 
         function initAudioEngine() {
             if (audioCtx) return;
@@ -490,17 +499,40 @@
                 engineGain.connect(audioCtx.destination);
                 engineOsc.start();
 
-                // Sub Oscillator (for EV Whine or V8 Bass or Engine Rumble)
+                engineHarmonicOsc = audioCtx.createOscillator();
+                engineHarmonicOsc.type = 'triangle';
+                const harmonicGain = audioCtx.createGain();
+                harmonicGain.gain.setValueAtTime(0.025, audioCtx.currentTime);
+                engineHarmonicOsc.connect(harmonicGain);
+                harmonicGain.connect(engineFilter);
+                engineHarmonicOsc.start();
+
+                // Lower engine and exhaust harmonics add body to the engine note.
                 subOsc = audioCtx.createOscillator();
                 subOsc.type = 'sine';
                 
                 subGain = audioCtx.createGain();
                 subGain.gain.setValueAtTime(0.02, audioCtx.currentTime);
 
-                subOsc.connect(audioCtx.destination);
+                subOsc.connect(engineFilter);
                 subOsc.start();
 
-                // LFO Oscillator (for Camper "Chug-Chug" rhythm)
+                const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
+                const noiseData = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < noiseData.length; i++) noiseData[i] = Math.random() * 2 - 1;
+                windSource = audioCtx.createBufferSource();
+                windSource.buffer = noiseBuffer;
+                windSource.loop = true;
+                windFilter = audioCtx.createBiquadFilter();
+                windFilter.type = 'lowpass';
+                windGain = audioCtx.createGain();
+                windGain.gain.setValueAtTime(0, audioCtx.currentTime);
+                windSource.connect(windFilter);
+                windFilter.connect(windGain);
+                windGain.connect(audioCtx.destination);
+                windSource.start();
+
+                // Subtle cyclic amplitude modulation, most noticeable on the camper.
                 lfoOsc = audioCtx.createOscillator();
                 lfoOsc.type = 'sine';
                 lfoOsc.frequency.setValueAtTime(8, audioCtx.currentTime);
@@ -525,6 +557,7 @@
             if (engineOsc) engineOsc.type = a.oscType;
             if (subOsc) subOsc.type = a.subType;
             if (engineFilter) engineFilter.Q.setValueAtTime(a.filterQ, audioCtx.currentTime);
+            if (windGain) windGain.gain.setTargetAtTime(a.intakeGain || 0.22, audioCtx.currentTime, 0.2);
         }
 
         function toggleAudioMute() {
@@ -537,6 +570,7 @@
                 statusText.innerText = 'Geluid Uit';
                 if (engineGain) engineGain.gain.setValueAtTime(0, audioCtx.currentTime);
                 if (subGain) subGain.gain.setValueAtTime(0, audioCtx.currentTime);
+                if (windGain) windGain.gain.setValueAtTime(0, audioCtx.currentTime);
             } else {
                 icon.className = 'fa-solid fa-volume-high text-emerald-400';
                 statusText.innerText = 'Geluid Aan';
@@ -552,33 +586,19 @@
             const profile = CAR_PROFILES[selectedCarType] || CAR_PROFILES.hatchback;
             const a = profile.audio;
 
-            // Pitch mapped specifically per vehicle audio config
-            let targetFreq = Math.max(30, (rpm / 6500) * 150 * a.pitchMult + 30);
-            
-            // Special EV Whine Frequency Boost
-            if (a.isEV) {
-                targetFreq = 200 + (Math.abs(speedKmH) * 18) + (rpm / 6500) * 600;
-            }
+            const now = audioCtx.currentTime;
+            const firingFrequency = Math.max(12, (rpm / 120) * (a.cylinders || 4));
+            const crankFrequency = Math.max(12, rpm / 60);
+            engineOsc.frequency.setTargetAtTime(firingFrequency * a.pitchMult, now, 0.06);
+            engineHarmonicOsc.frequency.setTargetAtTime(crankFrequency, now, 0.08);
+            subOsc.frequency.setTargetAtTime(Math.max(18, crankFrequency * 0.5), now, 0.08);
 
-            engineOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.05);
-
-            // Filter Cutoff scaled per vehicle audio config
-            const filterCutoff = Math.max(a.filterBase, (rpm / 6500) * a.filterScale + (Math.abs(speedKmH) * 6));
-            engineFilter.frequency.setTargetAtTime(filterCutoff, audioCtx.currentTime, 0.08);
-
-            // Engine Gain
-            const targetGain = isAccelerating ? 0.12 : 0.05;
-            engineGain.gain.setTargetAtTime(targetGain, audioCtx.currentTime, 0.1);
-
-            // Sub-Oscillator (V8 sub-bass or EV secondary harmonic whine)
-            if (subGain) {
-                let subFreq = targetFreq * 0.5;
-                if (a.isEV) subFreq = targetFreq * 1.5; // High EV harmonic
-                
-                subOsc.frequency.setTargetAtTime(subFreq, audioCtx.currentTime, 0.05);
-                const subVolume = isAccelerating ? a.subGainVal * 1.5 : a.subGainVal;
-                subGain.gain.setTargetAtTime(subVolume, audioCtx.currentTime, 0.1);
-            }
+            const filterCutoff = Math.max(a.filterBase, (rpm / 6500) * a.filterScale + (Math.abs(speedKmH) * 3));
+            engineFilter.frequency.setTargetAtTime(filterCutoff, now, 0.08);
+            engineGain.gain.setTargetAtTime(isAccelerating ? 0.075 : 0.035, now, 0.12);
+            subGain.gain.setTargetAtTime(a.subGainVal * (isAccelerating ? 1.25 : 0.55), now, 0.12);
+            windFilter.frequency.setTargetAtTime(500 + Math.abs(speedKmH) * 20, now, 0.15);
+            windGain.gain.setTargetAtTime(Math.min(0.12, Math.abs(speedKmH) / 2200), now, 0.2);
 
             // LFO pulse for Camper "Chug-Chug" engine rhythm
             if (lfoGain && lfoOsc) {
@@ -636,10 +656,14 @@
         let car, carModelGroup;
         let wheels = [];
         let roadMesh, centerLineMesh;
+        let bermMeshes = [];
+        let edgeLineMeshes = [];
+        let bermMaterial, edgeLineMaterial;
         const WORLD_SEED = 20261007;
         const CHUNK_SIZE = 200;
         const CHUNK_RADIUS = 2;
         const ROAD_WIDTH = 12;
+        const BERM_WIDTH = 4;
         const worldChunks = new Map();
         let terrainMaterial, roadMaterial, centerLineMaterial;
         let treeGeometry, trunkGeometry, treeMaterial, trunkMaterial;
@@ -773,6 +797,14 @@
                 const rim = new THREE.Mesh(rimGeo, rimMat);
                 wheelGroup.add(rim);
 
+                const sidewall = new THREE.Mesh(new THREE.TorusGeometry(radius * 0.72, radius * 0.025, 8, 24), tireMat);
+                sidewall.rotation.y = Math.PI / 2;
+                sidewall.position.x = width * 0.48;
+                wheelGroup.add(sidewall);
+                const hubGeo = new THREE.CylinderGeometry(radius * 0.16, radius * 0.16, width + 0.05, 12);
+                hubGeo.rotateZ(Math.PI / 2);
+                wheelGroup.add(new THREE.Mesh(hubGeo, chromeMat));
+
                 const spokeGeo = new THREE.BoxGeometry(width + 0.03, radius * 1.1, 0.06);
                 const spoke1 = new THREE.Mesh(spokeGeo, chromeMat);
                 const spoke2 = new THREE.Mesh(spokeGeo, chromeMat);
@@ -812,6 +844,25 @@
                 const wing = new THREE.Mesh(wingGeo, darkTrimMat);
                 wing.position.set(0, 1.1, 2.1);
                 carModelGroup.add(wing);
+                const wingPostGeo = new THREE.BoxGeometry(0.08, 0.38, 0.12);
+                [-0.72, 0.72].forEach((x) => {
+                    const post = new THREE.Mesh(wingPostGeo, darkTrimMat);
+                    post.position.set(x, 0.94, 2.05);
+                    carModelGroup.add(post);
+                });
+
+                const intakeGeo = new THREE.BoxGeometry(0.12, 0.38, 0.65);
+                [-1.08, 1.08].forEach((x) => {
+                    const intake = new THREE.Mesh(intakeGeo, darkTrimMat);
+                    intake.position.set(x, 0.73, 0.45);
+                    carModelGroup.add(intake);
+                });
+                const splitter = new THREE.Mesh(new THREE.BoxGeometry(2.25, 0.08, 0.38), darkTrimMat);
+                splitter.position.set(0, 0.28, -2.3);
+                carModelGroup.add(splitter);
+                const diffuser = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.16, 0.3), darkTrimMat);
+                diffuser.position.set(0, 0.28, 2.32);
+                carModelGroup.add(diffuser);
 
             } else if (type === 'cabrio') {
                 const bodyGeo = new THREE.BoxGeometry(2.1, 0.65, 4.4);
@@ -879,6 +930,60 @@
             }
 
             // Universal Mirrors & Lights
+            const addPart = (geometry, material, x, y, z, rotationY = 0) => {
+                const part = new THREE.Mesh(geometry, material);
+                part.position.set(x, y, z);
+                part.rotation.y = rotationY;
+                part.castShadow = true;
+                carModelGroup.add(part);
+                return part;
+            };
+            const headlightMat = new THREE.MeshStandardMaterial({
+                color: 0xf8fafc,
+                emissive: 0x64748b,
+                emissiveIntensity: 0.35,
+                roughness: 0.2
+            });
+            const indicatorMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+            const frontBumper = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.22, 0.22), darkTrimMat);
+            frontBumper.position.set(0, 0.38, -2.18);
+            carModelGroup.add(frontBumper);
+            const grille = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.32, 0.06), darkTrimMat);
+            grille.position.set(0, 0.58, -2.17);
+            carModelGroup.add(grille);
+            for (let i = 0; i < 4; i++) {
+                const slat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.025, 0.025), chromeMat);
+                slat.position.set(0, 0.46 + i * 0.075, -2.205);
+                carModelGroup.add(slat);
+            }
+            [-0.72, 0.72].forEach((x) => {
+                addPart(new THREE.BoxGeometry(0.48, 0.2, 0.09), headlightMat, x, 0.82, -2.16);
+                addPart(new THREE.BoxGeometry(0.12, 0.12, 0.08), indicatorMat, x * 1.34, 0.8, -2.14);
+            });
+
+            [-1, 1].forEach((side) => {
+                const sill = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.18, 2.5), darkTrimMat);
+                sill.position.set(side * 1.06, 0.38, 0);
+                carModelGroup.add(sill);
+                for (let door = 0; door < 2; door++) {
+                    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.045, 0.045), chromeMat);
+                    handle.position.set(side * 1.07, type === 'suv' || type === 'camper' ? 1.0 : 0.94, -0.55 + door * 1.0);
+                    carModelGroup.add(handle);
+                }
+                const sideWindow = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.48, type === 'sportscar' ? 1.15 : 1.35), glassMat);
+                sideWindow.position.set(side * 1.02, type === 'suv' || type === 'camper' ? 1.75 : 1.35, -0.05);
+                carModelGroup.add(sideWindow);
+            });
+
+            const windscreen = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.48, 0.055), glassMat);
+            windscreen.position.set(0, type === 'suv' || type === 'camper' ? 1.55 : 1.2, -1.1);
+            windscreen.rotation.x = -0.35;
+            carModelGroup.add(windscreen);
+            const rearGlass = windscreen.clone();
+            rearGlass.position.z = 1.05;
+            rearGlass.rotation.x = 0.35;
+            carModelGroup.add(rearGlass);
+
             const mirrorGeo = new THREE.BoxGeometry(0.25, 0.18, 0.15);
             const mirrorL = new THREE.Mesh(mirrorGeo, darkTrimMat);
             mirrorL.position.set(-1.18, 1.15, -0.8);
@@ -975,12 +1080,27 @@
                 roughness: 0.6,
                 metalness: 0.2
             });
+            bermMaterial = new THREE.MeshStandardMaterial({ color: 0x927c50, roughness: 1 });
+            edgeLineMaterial = new THREE.MeshBasicMaterial({ color: 0xe2e8f0 });
             centerLineMaterial = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
             roadMesh = new THREE.Mesh(new THREE.BufferGeometry(), roadMaterial);
             centerLineMesh = new THREE.Mesh(new THREE.BufferGeometry(), centerLineMaterial);
             roadMesh.receiveShadow = true;
             roadMesh.frustumCulled = false;
             centerLineMesh.frustumCulled = false;
+            bermMeshes = [-1, 1].map(() => {
+                const mesh = new THREE.Mesh(new THREE.BufferGeometry(), bermMaterial);
+                mesh.receiveShadow = true;
+                mesh.frustumCulled = false;
+                scene.add(mesh);
+                return mesh;
+            });
+            edgeLineMeshes = [-1, 1].map(() => {
+                const mesh = new THREE.Mesh(new THREE.BufferGeometry(), edgeLineMaterial);
+                mesh.frustumCulled = false;
+                scene.add(mesh);
+                return mesh;
+            });
             scene.add(roadMesh, centerLineMesh);
             updateRoadMesh(0);
         }
@@ -1093,7 +1213,7 @@
             }
         }
 
-        function buildStripGeometry(startZ, endZ, width, sampleCount) {
+        function buildStripGeometry(startZ, endZ, width, sampleCount, lateralOffset = 0, heightOffset = 0.16) {
             const vertices = [];
             const indices = [];
             for (let i = 0; i <= sampleCount; i++) {
@@ -1104,9 +1224,14 @@
                 const normalLength = Math.sqrt(1 + dx * dx);
                 const nx = 1 / normalLength;
                 const nz = dx / normalLength;
-                const y = getRoadHeight(z) + 0.16;
-                vertices.push(x + nx * width * 0.5, y, z + nz * width * 0.5);
-                vertices.push(x - nx * width * 0.5, y, z - nz * width * 0.5);
+                const centerX = x + nx * lateralOffset;
+                const centerZ = z + nz * lateralOffset;
+                const leftX = centerX + nx * width * 0.5;
+                const leftZ = centerZ + nz * width * 0.5;
+                const rightX = centerX - nx * width * 0.5;
+                const rightZ = centerZ - nz * width * 0.5;
+                vertices.push(leftX, getTerrainHeight(leftX, leftZ) + heightOffset, leftZ);
+                vertices.push(rightX, getTerrainHeight(rightX, rightZ) + heightOffset, rightZ);
                 if (i < sampleCount) {
                     const a = i * 2;
                     indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
@@ -1129,8 +1254,19 @@
             const endZ = worldZ - 2000;
             roadMesh.geometry.dispose();
             centerLineMesh.geometry.dispose();
-            roadMesh.geometry = buildStripGeometry(startZ, endZ, ROAD_WIDTH, 300);
-            centerLineMesh.geometry = buildStripGeometry(startZ, endZ, 0.25, 300);
+            roadMesh.geometry = buildStripGeometry(startZ, endZ, ROAD_WIDTH, 300, 0, 0.16);
+            centerLineMesh.geometry = buildStripGeometry(startZ, endZ, 0.25, 300, 0, 0.21);
+            bermMeshes.forEach((mesh, index) => {
+                mesh.geometry.dispose();
+                const side = index === 0 ? -1 : 1;
+                const offset = side * (ROAD_WIDTH * 0.5 + BERM_WIDTH * 0.5);
+                mesh.geometry = buildStripGeometry(startZ, endZ, BERM_WIDTH, 300, offset, 0.08);
+            });
+            edgeLineMeshes.forEach((mesh, index) => {
+                mesh.geometry.dispose();
+                const side = index === 0 ? -1 : 1;
+                mesh.geometry = buildStripGeometry(startZ, endZ, 0.18, 300, side * (ROAD_WIDTH * 0.5 - 0.15), 0.19);
+            });
         }
 
         function selectCar(type) {
