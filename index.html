@@ -662,14 +662,17 @@
         const WORLD_SEED = 20261007;
         const CHUNK_SIZE = 200;
         const CHUNK_RADIUS = 3;
-        const ROAD_WIDTH = 12;
+        const ROAD_WIDTH = 9;
         const BERM_WIDTH = 4;
+        const WORLD_SIZE = 1000;
         const worldChunks = new Map();
         let terrainMaterial, roadMaterial, centerLineMaterial;
         let treeGeometry, trunkGeometry, treeMaterial, trunkMaterial;
         let broadleafGeometry, pineGeometry, bushGeometry;
         let broadleafMaterial, pineMaterial, bushMaterial;
         let lakeMaterial;
+        let guardrailMaterial, guardrailPostMaterial;
+        let guardrailGeometry, guardrailPostGeometry;
         const worldLakes = new Map();
         let lastRoadWindow = null;
         let gameStarted = false;
@@ -1022,6 +1025,10 @@
             return ((h ^ (h >>> 16)) >>> 0) / 4294967295 * 2 - 1;
         }
 
+        function random01(seed) {
+            return hashNoise(seed) * 0.5 + 0.5;
+        }
+
         function smoothNoise(t) {
             return t * t * t * (t * (t * 6 - 15) + 10);
         }
@@ -1050,8 +1057,11 @@
         }
 
         function getRoadX(z) {
-            // Since x is a function of z, the centerline cannot cross itself.
-            return noise1D(z / 260) * 42 + noise1D(z / 780 + 31.7) * 18;
+            return Math.sin(z * 0.004) * 45 + Math.sin(z * 0.011) * 12;
+        }
+
+        function roadCenterX(z) {
+            return getRoadX(z);
         }
 
         function getRoadHeight(z) {
@@ -1099,6 +1109,10 @@
             return height;
         }
 
+        function terrainHeight(x, z) {
+            return getTerrainHeight(x, z);
+        }
+
         function createTerrain() {
             terrainMaterial = new THREE.MeshStandardMaterial({
                 color: 0xffffff,
@@ -1114,6 +1128,18 @@
                 opacity: 0.88,
                 side: THREE.DoubleSide
             });
+            guardrailMaterial = new THREE.MeshStandardMaterial({
+                color: 0x9a9a9a,
+                metalness: 0.65,
+                roughness: 0.4
+            });
+            guardrailPostMaterial = new THREE.MeshStandardMaterial({
+                color: 0x777777,
+                metalness: 0.5,
+                roughness: 0.5
+            });
+            guardrailGeometry = new THREE.BoxGeometry(1, 0.18, 0.18);
+            guardrailPostGeometry = new THREE.BoxGeometry(0.12, 0.9, 0.12);
         }
 
         function createRoad() {
@@ -1235,6 +1261,70 @@
             chunkGroup.add(broadleaves, pines, trunks, bushes);
         }
 
+        function createChunkGuardrails(chunkZ, chunkGroup) {
+            const firstSection = Math.floor((chunkZ * CHUNK_SIZE - CHUNK_SIZE * 0.5) / 20);
+            const lastSection = Math.ceil((chunkZ * CHUNK_SIZE + CHUNK_SIZE * 0.5) / 20);
+            const rail = new THREE.InstancedMesh(guardrailGeometry, guardrailMaterial, 12);
+            const posts = new THREE.InstancedMesh(guardrailPostGeometry, guardrailPostMaterial, 72);
+            const matrix = new THREE.Matrix4();
+            const position = new THREE.Vector3();
+            const scale = new THREE.Vector3();
+            const quaternion = new THREE.Quaternion();
+            const up = new THREE.Vector3(0, 1, 0);
+            let railCount = 0;
+            let postCount = 0;
+
+            for (let section = firstSection; section <= lastSection; section++) {
+                if (random01(section + 1400) < 0.38) continue;
+                const z0 = section * 20;
+                const z1 = z0 + 20;
+                const middleZ = (z0 + z1) * 0.5;
+                if (Math.floor((middleZ + CHUNK_SIZE * 0.5) / CHUNK_SIZE) !== chunkZ) continue;
+
+                const side = random01(section + 1800) < 0.5 ? -1 : 1;
+                const offset = side * (ROAD_WIDTH * 0.5 + BERM_WIDTH + 1.4);
+                const x0 = roadCenterX(z0) + offset;
+                const x1 = roadCenterX(z1) + offset;
+                const dx = x1 - x0;
+                const dz = z1 - z0;
+                const length = Math.hypot(dx, dz);
+                const yaw = Math.atan2(-dz, dx);
+                const middleX = (x0 + x1) * 0.5;
+                const groundY = getTerrainHeight(middleX, middleZ);
+                if (getLakeAt(middleX, middleZ)) continue;
+
+                position.set(middleX, groundY + 1.05, middleZ);
+                scale.set(length, 1, 1);
+                quaternion.setFromAxisAngle(up, yaw);
+                matrix.compose(position, quaternion, scale);
+                rail.setMatrixAt(railCount++, matrix);
+
+                for (let p = 0; p <= 5; p++) {
+                    const t = p / 5;
+                    const x = x0 + dx * t;
+                    const z = z0 + dz * t;
+                    position.set(x, getTerrainHeight(x, z) + 0.45, z);
+                    scale.set(1, 1, 1);
+                    quaternion.identity();
+                    matrix.compose(position, quaternion, scale);
+                    posts.setMatrixAt(postCount++, matrix);
+                }
+            }
+
+            rail.count = railCount;
+            posts.count = postCount;
+            rail.castShadow = true;
+            posts.castShadow = true;
+            chunkGroup.add(rail, posts);
+        }
+
+        function disposeTerrainChunk(chunk) {
+            scene.remove(chunk);
+            chunk.traverse((object) => {
+                if (object.isMesh && !object.isInstancedMesh) object.geometry.dispose();
+            });
+        }
+
         function createTerrainChunk(chunkX, chunkZ, lod) {
             const segments = lod === 0 ? 32 : (lod === 1 ? 16 : 8);
             const geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segments, segments);
@@ -1270,6 +1360,7 @@
             mesh.receiveShadow = true;
             group.add(mesh);
             createChunkTrees(chunkX, chunkZ, group);
+            createChunkGuardrails(chunkZ, group);
             group.userData.lod = lod;
             scene.add(group);
             return group;
@@ -1291,14 +1382,7 @@
 
                     const existing = worldChunks.get(key);
                     if (!existing || existing.userData.lod !== lod) {
-                        if (existing) {
-                            scene.remove(existing);
-                            existing.traverse((object) => {
-                                if (object.geometry && object.geometry !== treeGeometry && object.geometry !== trunkGeometry) {
-                                    object.geometry.dispose();
-                                }
-                            });
-                        }
+                        if (existing) disposeTerrainChunk(existing);
                         worldChunks.set(key, createTerrainChunk(x, z, lod));
                     }
                 }
@@ -1306,12 +1390,7 @@
 
             for (const [key, chunk] of worldChunks) {
                 if (!required.has(key)) {
-                    scene.remove(chunk);
-                    chunk.traverse((object) => {
-                        if (object.geometry && object.geometry !== treeGeometry && object.geometry !== trunkGeometry) {
-                            object.geometry.dispose();
-                        }
-                    });
+                    disposeTerrainChunk(chunk);
                     worldChunks.delete(key);
                 }
             }
@@ -1404,8 +1483,8 @@
             if (lastRoadWindow === windowIndex) return;
             lastRoadWindow = windowIndex;
 
-            const startZ = worldZ + 1000;
-            const endZ = worldZ - 2000;
+            const startZ = worldZ + WORLD_SIZE;
+            const endZ = worldZ - WORLD_SIZE * 2;
             roadMesh.geometry.dispose();
             centerLineMesh.geometry.dispose();
             roadMesh.geometry = buildStripGeometry(startZ, endZ, ROAD_WIDTH, 300, 0, 0.16);
