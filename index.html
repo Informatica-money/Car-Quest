@@ -661,12 +661,16 @@
         let bermMaterial, edgeLineMaterial;
         const WORLD_SEED = 20261007;
         const CHUNK_SIZE = 200;
-        const CHUNK_RADIUS = 2;
+        const CHUNK_RADIUS = 3;
         const ROAD_WIDTH = 12;
         const BERM_WIDTH = 4;
         const worldChunks = new Map();
         let terrainMaterial, roadMaterial, centerLineMaterial;
         let treeGeometry, trunkGeometry, treeMaterial, trunkMaterial;
+        let broadleafGeometry, pineGeometry, bushGeometry;
+        let broadleafMaterial, pineMaterial, bushMaterial;
+        let lakeMaterial;
+        const worldLakes = new Map();
         let lastRoadWindow = null;
         let gameStarted = false;
         let selectedCarType = 'hatchback';
@@ -708,11 +712,11 @@
 
             // 3D Scene setup
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87ceeb);
-            scene.fog = new THREE.FogExp2(0x87ceeb, 0.0012);
+            scene.background = new THREE.Color(0x91c9f4);
+            scene.fog = new THREE.FogExp2(0x9bc7e7, 0.00072);
 
             // Camera setup
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 3200);
 
             // WebGL Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -723,17 +727,17 @@
             container.appendChild(renderer.domElement);
 
             // Lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            const ambientLight = new THREE.HemisphereLight(0xd9efff, 0x617447, 1.15);
             scene.add(ambientLight);
 
-            const dirLight = new THREE.DirectionalLight(0xfff5ea, 1.0);
-            dirLight.position.set(100, 150, 50);
+            const dirLight = new THREE.DirectionalLight(0xfff3d6, 1.45);
+            dirLight.position.set(-100, 190, -120);
             dirLight.castShadow = true;
             dirLight.shadow.mapSize.width = 2048;
             dirLight.shadow.mapSize.height = 2048;
             dirLight.shadow.camera.near = 0.5;
             dirLight.shadow.camera.far = 500;
-            const d = 120;
+            const d = 170;
             dirLight.shadow.camera.left = -d;
             dirLight.shadow.camera.right = d;
             dirLight.shadow.camera.top = d;
@@ -1039,8 +1043,9 @@
         }
 
         function getRawTerrainHeight(x, z) {
-            return noise2D(x * 0.0012, z * 0.0012) * 28
-                + noise2D(x * 0.004, z * 0.004) * 10
+            return noise2D(x * 0.00048, z * 0.00062) * 28
+                + noise2D(x * 0.0012, z * 0.0012) * 22
+                + noise2D(x * 0.004, z * 0.004) * 8
                 + noise2D(x * 0.015, z * 0.015) * 2.5;
         }
 
@@ -1051,26 +1056,63 @@
 
         function getRoadHeight(z) {
             const x = getRoadX(z);
-            return noise2D(x * 0.00055, z * 0.00055) * 18
-                + noise2D(x * 0.0014, z * 0.0014) * 5;
+            return noise2D(x * 0.00045, z * 0.00055) * 15
+                + noise2D(x * 0.0012, z * 0.0012) * 4;
+        }
+
+        function getLakeForBand(band) {
+            const centerZ = band * 1050 + 525;
+            const side = hashNoise(band, 243) < 0 ? -1 : 1;
+            const centerX = getRoadX(centerZ) + side * (195 + hashNoise(band, 921) * 35);
+            const waterY = getRoadHeight(centerZ) - 3;
+            return { band, centerX, centerZ, waterY, radiusX: 145, radiusZ: 210 };
+        }
+
+        function getLakeAt(x, z) {
+            const band = Math.floor(z / 1050);
+            for (let i = band - 1; i <= band + 1; i++) {
+                const lake = getLakeForBand(i);
+                const dx = (x - lake.centerX) / lake.radiusX;
+                const dz = (z - lake.centerZ) / lake.radiusZ;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                if (distance < 1) return { lake, distance };
+            }
+            return null;
         }
 
         function getTerrainHeight(x, z) {
             const terrain = getRawTerrainHeight(x, z);
             const roadX = getRoadX(z);
             const distance = Math.abs(x - roadX);
-            if (distance >= 19) return terrain;
+            let height = terrain;
+            if (distance < 25) {
+                const roadHeight = getRoadHeight(z);
+                const blend = THREE.MathUtils.smoothstep(distance, ROAD_WIDTH * 0.5, 25);
+                height = THREE.MathUtils.lerp(roadHeight, terrain, blend);
+            }
 
-            const roadHeight = getRoadHeight(z);
-            const blend = THREE.MathUtils.smoothstep(distance, ROAD_WIDTH * 0.5, 19);
-            return THREE.MathUtils.lerp(roadHeight, terrain, blend);
+            const lakeAt = getLakeAt(x, z);
+            if (lakeAt) {
+                const shore = THREE.MathUtils.smoothstep(lakeAt.distance, 0.78, 1);
+                height = THREE.MathUtils.lerp(lakeAt.lake.waterY - 1.2, height, shore);
+            }
+            return height;
         }
 
         function createTerrain() {
             terrainMaterial = new THREE.MeshStandardMaterial({
-                color: 0x4d7c0f,
+                color: 0xffffff,
+                vertexColors: true,
                 roughness: 0.9,
-                metalness: 0.1
+                metalness: 0
+            });
+            lakeMaterial = new THREE.MeshStandardMaterial({
+                color: 0x4b9fbd,
+                roughness: 0.22,
+                metalness: 0.08,
+                transparent: true,
+                opacity: 0.88,
+                side: THREE.DoubleSide
             });
         }
 
@@ -1106,48 +1148,95 @@
         }
 
         function createEducationalObjects() {
-            treeGeometry = new THREE.ConeGeometry(3, 8, 5);
-            trunkGeometry = new THREE.CylinderGeometry(0.5, 0.7, 3, 5);
-            treeMaterial = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.9 });
-            trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x78350f });
+            treeGeometry = new THREE.ConeGeometry(1, 2, 9);
+            trunkGeometry = new THREE.CylinderGeometry(0.22, 0.38, 4, 7);
+            broadleafGeometry = new THREE.SphereGeometry(1, 9, 7);
+            pineGeometry = new THREE.ConeGeometry(1, 2, 8);
+            bushGeometry = new THREE.IcosahedronGeometry(1, 1);
+            treeMaterial = new THREE.MeshStandardMaterial({ color: 0x466c36, roughness: 1 });
+            trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x59432b, roughness: 1 });
+            broadleafMaterial = new THREE.MeshStandardMaterial({ color: 0x77954c, roughness: 1 });
+            pineMaterial = new THREE.MeshStandardMaterial({ color: 0x214b35, roughness: 1 });
+            bushMaterial = new THREE.MeshStandardMaterial({ color: 0x668746, roughness: 1 });
         }
 
         function createChunkTrees(chunkX, chunkZ, chunkGroup) {
-            const leaves = new THREE.InstancedMesh(treeGeometry, treeMaterial, 8);
-            const trunks = new THREE.InstancedMesh(trunkGeometry, trunkMaterial, 8);
+            const capacity = 28;
+            const broadleaves = new THREE.InstancedMesh(broadleafGeometry, broadleafMaterial, capacity);
+            const pines = new THREE.InstancedMesh(pineGeometry, pineMaterial, capacity * 3);
+            const trunks = new THREE.InstancedMesh(trunkGeometry, trunkMaterial, capacity);
+            const bushes = new THREE.InstancedMesh(bushGeometry, bushMaterial, 42);
             const matrix = new THREE.Matrix4();
             const position = new THREE.Vector3();
-            const scale = new THREE.Vector3(1, 1, 1);
+            const scale = new THREE.Vector3();
             const quaternion = new THREE.Quaternion();
-            let count = 0;
+            let broadleafCount = 0;
+            let pineCount = 0;
+            let trunkCount = 0;
+            let bushCount = 0;
 
-            for (let i = 0; i < 8; i++) {
-                const seedX = chunkX * 17 + i * 31 + 7;
-                const seedZ = chunkZ * 23 + i * 13 + 11;
+            for (let i = 0; i < capacity; i++) {
+                const seedX = chunkX * 177 + i * 31 + 7;
+                const seedZ = chunkZ * 223 + i * 13 + 11;
                 const localX = (hashNoise(seedX, seedZ) * 0.5 + 0.5) * CHUNK_SIZE;
                 const localZ = (hashNoise(seedZ, seedX) * 0.5 + 0.5) * CHUNK_SIZE;
                 const worldX = chunkX * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localX;
                 const worldZ = chunkZ * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localZ;
-                if (Math.abs(worldX - getRoadX(worldZ)) < 18) continue;
+                if (Math.abs(worldX - getRoadX(worldZ)) < 25 || getLakeAt(worldX, worldZ)) continue;
+                if (hashNoise(seedX + 19, seedZ) < -0.22) continue;
 
                 const groundY = getTerrainHeight(worldX, worldZ);
-                position.set(localX - CHUNK_SIZE * 0.5, groundY + 5.5, localZ - CHUNK_SIZE * 0.5);
+                const localGroundX = localX - CHUNK_SIZE * 0.5;
+                const localGroundZ = localZ - CHUNK_SIZE * 0.5;
+                const isPine = hashNoise(seedZ, seedX + 53) > 0.12;
+                const size = 0.75 + (hashNoise(seedX + 7, seedZ + 9) + 1) * 0.55;
+                if (isPine) {
+                    for (let tier = 0; tier < 3; tier++) {
+                        position.set(localGroundX, groundY + 3.1 + tier * 1.35, localGroundZ);
+                        scale.set(2.3 * size * (1 - tier * 0.2), 2.1 * size, 2.3 * size * (1 - tier * 0.2));
+                        matrix.compose(position, quaternion, scale);
+                        pines.setMatrixAt(pineCount++, matrix);
+                    }
+                } else {
+                    position.set(localGroundX, groundY + 5.4 * size, localGroundZ);
+                    scale.set(2.35 * size, 2.7 * size, 2.25 * size);
+                    matrix.compose(position, quaternion, scale);
+                    broadleaves.setMatrixAt(broadleafCount++, matrix);
+                }
+                position.set(localGroundX, groundY + 1.9, localGroundZ);
+                scale.set(0.34 * size, 1.05 * size, 0.34 * size);
                 matrix.compose(position, quaternion, scale);
-                leaves.setMatrixAt(count, matrix);
-                position.y = groundY + 1.5;
-                matrix.compose(position, quaternion, scale);
-                trunks.setMatrixAt(count, matrix);
-                count++;
+                trunks.setMatrixAt(trunkCount++, matrix);
             }
 
-            leaves.count = count;
-            trunks.count = count;
-            leaves.castShadow = true;
-            chunkGroup.add(leaves, trunks);
+            for (let i = 0; i < 42; i++) {
+                const seedX = chunkX * 311 + i * 41 + 3;
+                const seedZ = chunkZ * 197 + i * 29 + 5;
+                const localX = (hashNoise(seedX, seedZ) * 0.5 + 0.5) * CHUNK_SIZE;
+                const localZ = (hashNoise(seedZ, seedX) * 0.5 + 0.5) * CHUNK_SIZE;
+                const worldX = chunkX * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localX;
+                const worldZ = chunkZ * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localZ;
+                if (Math.abs(worldX - getRoadX(worldZ)) < 19 || getLakeAt(worldX, worldZ)) continue;
+                if (hashNoise(seedZ + 31, seedX) < 0) continue;
+                const groundY = getTerrainHeight(worldX, worldZ);
+                position.set(localX - CHUNK_SIZE * 0.5, groundY + 0.7, localZ - CHUNK_SIZE * 0.5);
+                const radius = 0.7 + Math.abs(hashNoise(seedX + 17, seedZ)) * 1.2;
+                scale.set(radius * 1.3, radius * 0.8, radius);
+                matrix.compose(position, quaternion, scale);
+                bushes.setMatrixAt(bushCount++, matrix);
+            }
+
+            broadleaves.count = broadleafCount;
+            pines.count = pineCount;
+            trunks.count = trunkCount;
+            bushes.count = bushCount;
+            broadleaves.castShadow = true;
+            pines.castShadow = true;
+            chunkGroup.add(broadleaves, pines, trunks, bushes);
         }
 
         function createTerrainChunk(chunkX, chunkZ, lod) {
-            const segments = lod === 0 ? 32 : 16;
+            const segments = lod === 0 ? 32 : (lod === 1 ? 16 : 8);
             const geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segments, segments);
             geometry.rotateX(-Math.PI / 2);
             const positions = geometry.attributes.position;
@@ -1160,6 +1249,20 @@
                 positions.setY(i, getTerrainHeight(worldX, worldZ));
             }
             geometry.computeVertexNormals();
+            const colors = [];
+            const meadowLow = new THREE.Color(0x587b3e);
+            const meadowHigh = new THREE.Color(0x91a666);
+            const grassColor = new THREE.Color();
+            for (let i = 0; i < positions.count; i++) {
+                const worldX = originX + positions.getX(i);
+                const worldZ = originZ + positions.getZ(i);
+                const heightBlend = THREE.MathUtils.smoothstep(positions.getY(i), 4, 32);
+                const variation = noise2D(worldX * 0.035, worldZ * 0.035) * 0.055;
+                grassColor.copy(meadowLow).lerp(meadowHigh, heightBlend);
+                grassColor.multiplyScalar(1 + variation);
+                colors.push(grassColor.r, grassColor.g, grassColor.b);
+            }
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
             const group = new THREE.Group();
             group.position.set(originX, 0, originZ);
@@ -1182,7 +1285,8 @@
                     const x = centerX + dx;
                     const z = centerZ + dz;
                     const key = `${x},${z}`;
-                    const lod = Math.max(Math.abs(dx), Math.abs(dz)) === CHUNK_RADIUS ? 1 : 0;
+                    const distance = Math.max(Math.abs(dx), Math.abs(dz));
+                    const lod = distance === CHUNK_RADIUS ? 2 : (distance === CHUNK_RADIUS - 1 ? 1 : 0);
                     required.add(key);
 
                     const existing = worldChunks.get(key);
@@ -1209,6 +1313,56 @@
                         }
                     });
                     worldChunks.delete(key);
+                }
+            }
+            updateWorldLakes(centerZ);
+        }
+
+        function createLakeMesh(lake) {
+            const segments = 96;
+            const positions = [0, 0, 0];
+            const indices = [];
+            for (let i = 0; i <= segments; i++) {
+                const angle = i / segments * Math.PI * 2;
+                const variation = 1 + noise1D(lake.band * 11 + i * 0.13) * 0.045;
+                positions.push(
+                    Math.cos(angle) * lake.radiusX * 0.79 * variation,
+                    0,
+                    Math.sin(angle) * lake.radiusZ * 0.79 * variation
+                );
+                if (i < segments) indices.push(0, i + 2, i + 1);
+            }
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setIndex(indices);
+            geometry.computeVertexNormals();
+            const mesh = new THREE.Mesh(geometry, lakeMaterial);
+            mesh.position.set(lake.centerX, lake.waterY, lake.centerZ);
+            mesh.renderOrder = 1;
+            mesh.frustumCulled = false;
+            return mesh;
+        }
+
+        function updateWorldLakes(centerChunkZ) {
+            const centerZ = centerChunkZ * CHUNK_SIZE;
+            const firstBand = Math.floor((centerZ - CHUNK_SIZE * (CHUNK_RADIUS + 1)) / 1050);
+            const lastBand = Math.ceil((centerZ + CHUNK_SIZE * (CHUNK_RADIUS + 1)) / 1050);
+            const required = new Set();
+            for (let band = firstBand; band <= lastBand; band++) {
+                const key = String(band);
+                required.add(key);
+                if (!worldLakes.has(key)) {
+                    const lake = getLakeForBand(band);
+                    const mesh = createLakeMesh(lake);
+                    scene.add(mesh);
+                    worldLakes.set(key, mesh);
+                }
+            }
+            for (const [key, mesh] of worldLakes) {
+                if (!required.has(key)) {
+                    scene.remove(mesh);
+                    mesh.geometry.dispose();
+                    worldLakes.delete(key);
                 }
             }
         }
