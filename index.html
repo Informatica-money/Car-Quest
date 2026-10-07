@@ -635,7 +635,15 @@
         let scene, camera, renderer;
         let car, carModelGroup;
         let wheels = [];
-        let terrainMesh, roadMesh;
+        let roadMesh, centerLineMesh;
+        const WORLD_SEED = 20261007;
+        const CHUNK_SIZE = 200;
+        const CHUNK_RADIUS = 2;
+        const ROAD_WIDTH = 12;
+        const worldChunks = new Map();
+        let terrainMaterial, roadMaterial, centerLineMaterial;
+        let treeGeometry, trunkGeometry, treeMaterial, trunkMaterial;
+        let lastRoadWindow = null;
         let gameStarted = false;
         let selectedCarType = 'hatchback';
         let cameraMode = 0; // 0 = 3rd Person (Locked), 1 = Cockpit
@@ -898,99 +906,231 @@
             car.add(carModelGroup);
         }
 
+        function hashNoise(x, z = 0) {
+            let h = WORLD_SEED ^ Math.imul(x | 0, 0x1f1f1f1f) ^ Math.imul(z | 0, 0x5f356495);
+            h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+            h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+            return ((h ^ (h >>> 16)) >>> 0) / 4294967295 * 2 - 1;
+        }
+
+        function smoothNoise(t) {
+            return t * t * t * (t * (t * 6 - 15) + 10);
+        }
+
+        function noise1D(x) {
+            const i = Math.floor(x);
+            const t = smoothNoise(x - i);
+            return THREE.MathUtils.lerp(hashNoise(i), hashNoise(i + 1), t);
+        }
+
+        function noise2D(x, z) {
+            const ix = Math.floor(x);
+            const iz = Math.floor(z);
+            const tx = smoothNoise(x - ix);
+            const tz = smoothNoise(z - iz);
+            const a = THREE.MathUtils.lerp(hashNoise(ix, iz), hashNoise(ix + 1, iz), tx);
+            const b = THREE.MathUtils.lerp(hashNoise(ix, iz + 1), hashNoise(ix + 1, iz + 1), tx);
+            return THREE.MathUtils.lerp(a, b, tz);
+        }
+
+        function getRawTerrainHeight(x, z) {
+            return noise2D(x * 0.0012, z * 0.0012) * 28
+                + noise2D(x * 0.004, z * 0.004) * 10
+                + noise2D(x * 0.015, z * 0.015) * 2.5;
+        }
+
+        function getRoadX(z) {
+            // Since x is a function of z, the centerline cannot cross itself.
+            return noise1D(z / 260) * 42 + noise1D(z / 780 + 31.7) * 18;
+        }
+
+        function getRoadHeight(z) {
+            const x = getRoadX(z);
+            return noise2D(x * 0.00055, z * 0.00055) * 18
+                + noise2D(x * 0.0014, z * 0.0014) * 5;
+        }
+
+        function getTerrainHeight(x, z) {
+            const terrain = getRawTerrainHeight(x, z);
+            const roadX = getRoadX(z);
+            const distance = Math.abs(x - roadX);
+            if (distance >= 19) return terrain;
+
+            const roadHeight = getRoadHeight(z);
+            const blend = THREE.MathUtils.smoothstep(distance, ROAD_WIDTH * 0.5, 19);
+            return THREE.MathUtils.lerp(roadHeight, terrain, blend);
+        }
+
         function createTerrain() {
-            const size = 2000;
-            const geometry = new THREE.PlaneGeometry(size, size, 120, 120);
-            geometry.rotateX(-Math.PI / 2);
-
-            const pos = geometry.attributes.position;
-            for (let i = 0; i < pos.count; i++) {
-                const x = pos.getX(i);
-                const z = pos.getZ(i);
-                const distFromCenter = Math.abs(x);
-                if (distFromCenter > 15) {
-                    const noise = Math.sin(x * 0.015) * Math.cos(z * 0.015) * 8 + Math.sin(z * 0.005) * 15;
-                    pos.setY(i, Math.max(-2, noise));
-                } else {
-                    pos.setY(i, -0.1);
-                }
-            }
-            geometry.computeVertexNormals();
-
-            const material = new THREE.MeshStandardMaterial({
+            terrainMaterial = new THREE.MeshStandardMaterial({
                 color: 0x4d7c0f,
                 roughness: 0.9,
                 metalness: 0.1
             });
-
-            terrainMesh = new THREE.Mesh(geometry, material);
-            terrainMesh.receiveShadow = true;
-            scene.add(terrainMesh);
         }
 
         function createRoad() {
-            const length = 2000;
-            const width = 12;
-
-            const roadGeo = new THREE.PlaneGeometry(width, length, 1, 200);
-            roadGeo.rotateX(-Math.PI / 2);
-
-            const pos = roadGeo.attributes.position;
-            for (let i = 0; i < pos.count; i++) {
-                const z = pos.getZ(i);
-                const curve = Math.sin(z * 0.008) * 25;
-                pos.setX(i, pos.getX(i) + curve);
-            }
-            roadGeo.computeVertexNormals();
-
-            const roadMat = new THREE.MeshStandardMaterial({
+            roadMaterial = new THREE.MeshStandardMaterial({
                 color: 0x334155,
                 roughness: 0.6,
                 metalness: 0.2
             });
-
-            roadMesh = new THREE.Mesh(roadGeo, roadMat);
-            roadMesh.position.y = 0.05;
+            centerLineMaterial = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+            roadMesh = new THREE.Mesh(new THREE.BufferGeometry(), roadMaterial);
+            centerLineMesh = new THREE.Mesh(new THREE.BufferGeometry(), centerLineMaterial);
             roadMesh.receiveShadow = true;
-            scene.add(roadMesh);
-
-            const lineGeo = new THREE.PlaneGeometry(0.35, length, 1, 100);
-            lineGeo.rotateX(-Math.PI / 2);
-            const linePos = lineGeo.attributes.position;
-            for (let i = 0; i < linePos.count; i++) {
-                const z = linePos.getZ(i);
-                const curve = Math.sin(z * 0.008) * 25;
-                linePos.setX(i, linePos.getX(i) + curve);
-            }
-
-            const lineMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
-            const centerLine = new THREE.Mesh(lineGeo, lineMat);
-            centerLine.position.y = 0.07;
-            scene.add(centerLine);
+            roadMesh.frustumCulled = false;
+            centerLineMesh.frustumCulled = false;
+            scene.add(roadMesh, centerLineMesh);
+            updateRoadMesh(0);
         }
 
         function createEducationalObjects() {
-            const treeGeo = new THREE.ConeGeometry(3, 8, 5);
-            const trunkGeo = new THREE.CylinderGeometry(0.5, 0.7, 3, 5);
-            const treeMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.9 });
-            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x78350f });
+            treeGeometry = new THREE.ConeGeometry(3, 8, 5);
+            trunkGeometry = new THREE.CylinderGeometry(0.5, 0.7, 3, 5);
+            treeMaterial = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.9 });
+            trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x78350f });
+        }
 
-            for (let i = 0; i < 180; i++) {
-                const tree = new THREE.Group();
-                const leaves = new THREE.Mesh(treeGeo, treeMat);
-                leaves.position.y = 5.5;
-                leaves.castShadow = true;
-                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-                trunk.position.y = 1.5;
-                tree.add(leaves);
-                tree.add(trunk);
+        function createChunkTrees(chunkX, chunkZ, chunkGroup) {
+            const leaves = new THREE.InstancedMesh(treeGeometry, treeMaterial, 8);
+            const trunks = new THREE.InstancedMesh(trunkGeometry, trunkMaterial, 8);
+            const matrix = new THREE.Matrix4();
+            const position = new THREE.Vector3();
+            const scale = new THREE.Vector3(1, 1, 1);
+            const quaternion = new THREE.Quaternion();
+            let count = 0;
 
-                const side = Math.random() > 0.5 ? 1 : -1;
-                const dist = 18 + Math.random() * 80;
-                const zPos = -Math.random() * 1800;
-                tree.position.set(side * dist, 0, zPos);
-                scene.add(tree);
+            for (let i = 0; i < 8; i++) {
+                const seedX = chunkX * 17 + i * 31 + 7;
+                const seedZ = chunkZ * 23 + i * 13 + 11;
+                const localX = (hashNoise(seedX, seedZ) * 0.5 + 0.5) * CHUNK_SIZE;
+                const localZ = (hashNoise(seedZ, seedX) * 0.5 + 0.5) * CHUNK_SIZE;
+                const worldX = chunkX * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localX;
+                const worldZ = chunkZ * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localZ;
+                if (Math.abs(worldX - getRoadX(worldZ)) < 18) continue;
+
+                const groundY = getTerrainHeight(worldX, worldZ);
+                position.set(localX - CHUNK_SIZE * 0.5, groundY + 5.5, localZ - CHUNK_SIZE * 0.5);
+                matrix.compose(position, quaternion, scale);
+                leaves.setMatrixAt(count, matrix);
+                position.y = groundY + 1.5;
+                matrix.compose(position, quaternion, scale);
+                trunks.setMatrixAt(count, matrix);
+                count++;
             }
+
+            leaves.count = count;
+            trunks.count = count;
+            leaves.castShadow = true;
+            chunkGroup.add(leaves, trunks);
+        }
+
+        function createTerrainChunk(chunkX, chunkZ, lod) {
+            const segments = lod === 0 ? 32 : 16;
+            const geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segments, segments);
+            geometry.rotateX(-Math.PI / 2);
+            const positions = geometry.attributes.position;
+            const originX = chunkX * CHUNK_SIZE;
+            const originZ = chunkZ * CHUNK_SIZE;
+
+            for (let i = 0; i < positions.count; i++) {
+                const worldX = originX + positions.getX(i);
+                const worldZ = originZ + positions.getZ(i);
+                positions.setY(i, getTerrainHeight(worldX, worldZ));
+            }
+            geometry.computeVertexNormals();
+
+            const group = new THREE.Group();
+            group.position.set(originX, 0, originZ);
+            const mesh = new THREE.Mesh(geometry, terrainMaterial);
+            mesh.receiveShadow = true;
+            group.add(mesh);
+            createChunkTrees(chunkX, chunkZ, group);
+            group.userData.lod = lod;
+            scene.add(group);
+            return group;
+        }
+
+        function updateWorldChunks() {
+            const centerX = Math.floor(car.position.x / CHUNK_SIZE + 0.5);
+            const centerZ = Math.floor(car.position.z / CHUNK_SIZE + 0.5);
+            const required = new Set();
+
+            for (let dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
+                for (let dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
+                    const x = centerX + dx;
+                    const z = centerZ + dz;
+                    const key = `${x},${z}`;
+                    const lod = Math.max(Math.abs(dx), Math.abs(dz)) === CHUNK_RADIUS ? 1 : 0;
+                    required.add(key);
+
+                    const existing = worldChunks.get(key);
+                    if (!existing || existing.userData.lod !== lod) {
+                        if (existing) {
+                            scene.remove(existing);
+                            existing.traverse((object) => {
+                                if (object.geometry && object.geometry !== treeGeometry && object.geometry !== trunkGeometry) {
+                                    object.geometry.dispose();
+                                }
+                            });
+                        }
+                        worldChunks.set(key, createTerrainChunk(x, z, lod));
+                    }
+                }
+            }
+
+            for (const [key, chunk] of worldChunks) {
+                if (!required.has(key)) {
+                    scene.remove(chunk);
+                    chunk.traverse((object) => {
+                        if (object.geometry && object.geometry !== treeGeometry && object.geometry !== trunkGeometry) {
+                            object.geometry.dispose();
+                        }
+                    });
+                    worldChunks.delete(key);
+                }
+            }
+        }
+
+        function buildStripGeometry(startZ, endZ, width, sampleCount) {
+            const vertices = [];
+            const indices = [];
+            for (let i = 0; i <= sampleCount; i++) {
+                const t = i / sampleCount;
+                const z = startZ + (endZ - startZ) * t;
+                const x = getRoadX(z);
+                const dx = (getRoadX(z + 1) - getRoadX(z - 1)) * 0.5;
+                const normalLength = Math.sqrt(1 + dx * dx);
+                const nx = 1 / normalLength;
+                const nz = dx / normalLength;
+                const y = getRoadHeight(z) + 0.16;
+                vertices.push(x + nx * width * 0.5, y, z + nz * width * 0.5);
+                vertices.push(x - nx * width * 0.5, y, z - nz * width * 0.5);
+                if (i < sampleCount) {
+                    const a = i * 2;
+                    indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+                }
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geometry.setIndex(indices);
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
+        function updateRoadMesh(worldZ) {
+            const windowIndex = Math.floor(worldZ / 40);
+            if (lastRoadWindow === windowIndex) return;
+            lastRoadWindow = windowIndex;
+
+            const startZ = worldZ + 1000;
+            const endZ = worldZ - 2000;
+            roadMesh.geometry.dispose();
+            centerLineMesh.geometry.dispose();
+            roadMesh.geometry = buildStripGeometry(startZ, endZ, ROAD_WIDTH, 300);
+            centerLineMesh.geometry = buildStripGeometry(startZ, endZ, 0.25, 300);
         }
 
         function selectCar(type) {
@@ -1104,6 +1244,7 @@
             const turnRate = Math.min(1.2, Math.abs(p.speed) * 0.045 + 0.1);
             car.rotation.y += p.steeringAngle * turnRate;
             car.translateZ(-p.speed * delta * 4);
+            car.position.y = getTerrainHeight(car.position.x, car.position.z) + 0.1;
 
             // Pitch & Roll
             const targetPitch = (accelForce * 0.005);
@@ -1275,6 +1416,8 @@
 
             if (gameStarted) {
                 updatePhysics(delta);
+                updateWorldChunks();
+                updateRoadMesh(car.position.z);
                 updateCamera();
             } else {
                 camera.position.x = Math.sin(now * 0.0005) * 12;
