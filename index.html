@@ -679,8 +679,19 @@
         const WORLD_SEED = 20261007;
         const CHUNK_SIZE = 200;
         const CHUNK_RADIUS = 2;
+        const ROAD_SEGMENT_LENGTH = 32;
+        const ROAD_WIDTH = 9;
+        const ROAD_POOL_BEHIND = 5;
+        const ROAD_POOL_AHEAD = 36;
         const worldChunks = new Map();
         let terrainMaterial;
+        let roadMaterial;
+        let roadPool = [];
+        let streamedRoadSegments = new Map();
+        let roadWaypoints = [];
+        let roadStartHeight = 0;
+        let lastRoadStreamIndex = null;
+        let playerRoadProgress = 0;
         let treeGeometry, trunkGeometry, treeMaterial, trunkMaterial;
         const SPAWN_POSITION = new THREE.Vector3(0, 0, 0);
         let lastCollisionSoundTime = 0;
@@ -759,6 +770,7 @@
 
             // Create World Meshes
             createTerrain();
+            createRoadSystem();
             
             // Create Root Car Container
             car = new THREE.Group();
@@ -768,8 +780,9 @@
             buildDetailedCarMesh(selectedCarType);
 
             createEducationalObjects();
-            car.position.copy(SPAWN_POSITION);
-            car.position.y = getTerrainHeight(car.position.x, car.position.z) + 0.1;
+            const spawn = getRoadPoint(0);
+            car.position.set(spawn.x, spawn.y + 0.1, spawn.z);
+            car.rotation.y = getRoadYaw(0);
             updateWorldChunks();
 
             setupInputListeners();
@@ -982,8 +995,249 @@
                 + noise2D(x * 0.015, z * 0.015) * 2.5;
         }
 
+        function routeRandom(index, salt) {
+            return hashNoise(index * 31 + salt, WORLD_SEED);
+        }
+
+        function createRoadSystem() {
+            roadStartHeight = getRawTerrainHeight(0, 0);
+            roadWaypoints = [{ x: 0, y: roadStartHeight, z: 0, heading: 0 }];
+            roadMaterial = new THREE.MeshStandardMaterial({
+                color: 0x454545,
+                roughness: 0.92,
+                metalness: 0
+            });
+
+            const poolSize = ROAD_POOL_BEHIND + ROAD_POOL_AHEAD + 1;
+            roadPool = [];
+            for (let i = 0; i < poolSize; i++) {
+                const mesh = new THREE.Mesh(new THREE.BufferGeometry(), roadMaterial);
+                mesh.frustumCulled = false;
+                mesh.receiveShadow = true;
+                scene.add(mesh);
+                roadPool.push(mesh);
+            }
+        }
+
+        // Seeded waypoints define repeating straight, sweeping, S-bend, and hill phases.
+        function generateRoadWaypoint(index) {
+            const previous = roadWaypoints[index - 1];
+            const block = Math.floor((index - 1) / 24);
+            const phase = (index - 1) % 24;
+            const direction = routeRandom(block, 810) < 0 ? -1 : 1;
+            const variation = routeRandom(index, 1210) * 0.025;
+            let turn;
+
+            if (phase < 5) {
+                turn = variation;
+            } else if (phase < 11) {
+                turn = direction * (0.065 + routeRandom(index, 1510) * 0.035) + variation * 0.35;
+            } else if (phase < 14) {
+                turn = variation;
+            } else if (phase < 20) {
+                turn = direction * (phase < 17 ? 0.11 : -0.12) + variation * 0.3;
+            } else {
+                turn = direction * (0.17 + routeRandom(index, 1910) * 0.045) + variation * 0.25;
+            }
+
+            const heading = THREE.MathUtils.clamp(previous.heading + turn, -1.05, 1.05);
+            let grade;
+            if (phase < 5 || (phase >= 11 && phase < 14)) {
+                grade = routeRandom(index, 2310) * 0.012;
+            } else if (phase < 11) {
+                grade = 0.035 + routeRandom(index, 2710) * 0.02;
+            } else if (phase < 20) {
+                grade = -0.035 + routeRandom(index, 3110) * 0.02;
+            } else {
+                grade = routeRandom(index, 3510) * 0.085;
+            }
+
+            roadWaypoints.push({
+                x: previous.x + Math.sin(heading) * ROAD_SEGMENT_LENGTH,
+                y: previous.y + grade * ROAD_SEGMENT_LENGTH,
+                z: previous.z - Math.cos(heading) * ROAD_SEGMENT_LENGTH,
+                heading
+            });
+        }
+
+        function getRoadWaypoint(index) {
+            if (index < 0) {
+                return { x: 0, y: roadStartHeight, z: -index * ROAD_SEGMENT_LENGTH, heading: 0 };
+            }
+            while (roadWaypoints.length <= index) {
+                generateRoadWaypoint(roadWaypoints.length);
+            }
+            return roadWaypoints[index];
+        }
+
+        function catmullRom(a, b, c, d, t, key) {
+            const t2 = t * t;
+            const t3 = t2 * t;
+            return 0.5 * (
+                2 * b[key]
+                + (-a[key] + c[key]) * t
+                + (2 * a[key] - 5 * b[key] + 4 * c[key] - d[key]) * t2
+                + (-a[key] + 3 * b[key] - 3 * c[key] + d[key]) * t3
+            );
+        }
+
+        function getRoadPoint(distance) {
+            const segment = Math.floor(distance / ROAD_SEGMENT_LENGTH);
+            const t = THREE.MathUtils.clamp(
+                (distance - segment * ROAD_SEGMENT_LENGTH) / ROAD_SEGMENT_LENGTH,
+                0,
+                1
+            );
+            const a = getRoadWaypoint(segment - 1);
+            const b = getRoadWaypoint(segment);
+            const c = getRoadWaypoint(segment + 1);
+            const d = getRoadWaypoint(segment + 2);
+            return {
+                x: catmullRom(a, b, c, d, t, 'x'),
+                y: catmullRom(a, b, c, d, t, 'y'),
+                z: catmullRom(a, b, c, d, t, 'z')
+            };
+        }
+
+        function getRoadPointAtZ(z) {
+            if (z >= 0) {
+                return { point: { x: 0, y: roadStartHeight, z }, distance: -z };
+            }
+
+            while (roadWaypoints[roadWaypoints.length - 1].z > z - ROAD_SEGMENT_LENGTH) {
+                generateRoadWaypoint(roadWaypoints.length);
+            }
+
+            let low = 0;
+            let high = roadWaypoints.length - 1;
+            while (low < high) {
+                const middle = (low + high) >> 1;
+                if (roadWaypoints[middle].z > z) low = middle + 1;
+                else high = middle;
+            }
+
+            let bestPoint = roadWaypoints[low];
+            let bestDistance = Math.abs(bestPoint.z - z);
+            let bestProgress = low;
+            for (let segment = Math.max(-1, low - 2); segment <= low + 1; segment++) {
+                let left = 0;
+                let right = 1;
+                for (let i = 0; i < 10; i++) {
+                    const middle = (left + right) * 0.5;
+                    const point = getRoadPoint((segment + middle) * ROAD_SEGMENT_LENGTH);
+                    if (point.z > z) left = middle;
+                    else right = middle;
+                }
+                const t = (left + right) * 0.5;
+                const point = getRoadPoint((segment + t) * ROAD_SEGMENT_LENGTH);
+                const distance = Math.abs(point.z - z);
+                if (distance < bestDistance || bestProgress === low) {
+                    bestPoint = point;
+                    bestDistance = distance;
+                    bestProgress = segment + t;
+                }
+            }
+            return { point: bestPoint, distance: bestProgress * ROAD_SEGMENT_LENGTH };
+        }
+
+        function getRoadYaw(distance) {
+            const before = getRoadPoint(distance - 1);
+            const after = getRoadPoint(distance + 1);
+            return Math.atan2(-(after.x - before.x), -(after.z - before.z));
+        }
+
+        function getNearestRoadPoint(x, z) {
+            const nearest = getRoadPointAtZ(z);
+            return {
+                point: nearest.point,
+                distance: Math.hypot(x - nearest.point.x, z - nearest.point.z)
+            };
+        }
+
+        function getRoadProgress(x, z, previousProgress) {
+            const center = Math.floor(previousProgress);
+            let bestProgress = previousProgress;
+            let bestDistanceSq = Infinity;
+            for (let segment = Math.max(-1, center - 4); segment <= center + 8; segment++) {
+                const start = getRoadPoint(segment * ROAD_SEGMENT_LENGTH);
+                const end = getRoadPoint((segment + 1) * ROAD_SEGMENT_LENGTH);
+                const dx = end.x - start.x;
+                const dz = end.z - start.z;
+                const lengthSq = dx * dx + dz * dz;
+                const t = THREE.MathUtils.clamp(
+                    ((x - start.x) * dx + (z - start.z) * dz) / lengthSq,
+                    0,
+                    1
+                );
+                const nearestX = start.x + dx * t;
+                const nearestZ = start.z + dz * t;
+                const distanceSq = (x - nearestX) ** 2 + (z - nearestZ) ** 2;
+                if (distanceSq < bestDistanceSq) {
+                    bestDistanceSq = distanceSq;
+                    bestProgress = segment + t;
+                }
+            }
+            return bestProgress;
+        }
+
+        function createRoadSegmentGeometry(segment) {
+            const samples = 12;
+            const vertices = [];
+            const indices = [];
+            for (let i = 0; i <= samples; i++) {
+                const t = i / samples;
+                const distance = (segment + t) * ROAD_SEGMENT_LENGTH;
+                const center = getRoadPoint(distance);
+                const before = getRoadPoint(distance - 0.5);
+                const after = getRoadPoint(distance + 0.5);
+                const dx = after.x - before.x;
+                const dz = after.z - before.z;
+                const length = Math.hypot(dx, dz) || 1;
+                const nx = -dz / length;
+                const nz = dx / length;
+                vertices.push(
+                    center.x + nx * ROAD_WIDTH * 0.5, center.y + 0.16, center.z + nz * ROAD_WIDTH * 0.5,
+                    center.x - nx * ROAD_WIDTH * 0.5, center.y + 0.16, center.z - nz * ROAD_WIDTH * 0.5
+                );
+                if (i < samples) {
+                    const a = i * 2;
+                    indices.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+                }
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geometry.setIndex(indices);
+            geometry.computeVertexNormals();
+            return geometry;
+        }
+
+        function updateRoadStream() {
+            playerRoadProgress = getRoadProgress(car.position.x, car.position.z, playerRoadProgress);
+            const firstSegment = Math.floor(playerRoadProgress) - ROAD_POOL_BEHIND;
+            if (firstSegment === lastRoadStreamIndex) return;
+            lastRoadStreamIndex = firstSegment;
+            const newSegments = new Map();
+            // Keep a fixed set of meshes and reassign them as the player advances.
+            for (let i = 0; i < roadPool.length; i++) {
+                const segment = firstSegment + i;
+                const mesh = roadPool[i];
+                if (mesh.userData.segment !== segment) {
+                    mesh.geometry.dispose();
+                    mesh.geometry = createRoadSegmentGeometry(segment);
+                    mesh.userData.segment = segment;
+                }
+                newSegments.set(segment, mesh);
+            }
+            streamedRoadSegments = newSegments;
+        }
+
         function getTerrainHeight(x, z) {
-            return getRawTerrainHeight(x, z);
+            const terrain = getRawTerrainHeight(x, z);
+            const nearest = getNearestRoadPoint(x, z);
+            if (nearest.distance > ROAD_WIDTH * 0.5 + 9) return terrain;
+            const blend = THREE.MathUtils.smoothstep(nearest.distance, ROAD_WIDTH * 0.5, ROAD_WIDTH * 0.5 + 9);
+            return THREE.MathUtils.lerp(nearest.point.y, terrain, blend);
         }
 
         function createTerrain() {
@@ -1018,6 +1272,7 @@
                 const localZ = (hashNoise(seedZ, seedX) * 0.5 + 0.5) * CHUNK_SIZE;
                 const worldX = chunkX * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localX;
                 const worldZ = chunkZ * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localZ;
+                if (getNearestRoadPoint(worldX, worldZ).distance < ROAD_WIDTH * 0.5 + 5) continue;
                 if (Math.hypot(worldX - SPAWN_POSITION.x, worldZ - SPAWN_POSITION.z) < 9) continue;
                 const groundY = getTerrainHeight(worldX, worldZ);
                 position.set(localX - CHUNK_SIZE * 0.5, groundY + 5.5, localZ - CHUNK_SIZE * 0.5);
@@ -1102,6 +1357,7 @@
                     worldChunks.delete(key);
                 }
             }
+            updateRoadStream();
         }
 
         function selectCar(type) {
@@ -1297,8 +1553,11 @@
 
         function resetCar() {
             if (!car) return;
-            car.position.set(SPAWN_POSITION.x, getTerrainHeight(SPAWN_POSITION.x, SPAWN_POSITION.z) + 0.1, SPAWN_POSITION.z);
-            car.rotation.set(0, 0, 0);
+            const spawn = getRoadPoint(0);
+            car.position.set(spawn.x, spawn.y + 0.1, spawn.z);
+            car.rotation.set(0, getRoadYaw(0), 0);
+            playerRoadProgress = 0;
+            lastRoadStreamIndex = null;
             vehiclePhysics.speed = 0;
             vehiclePhysics.speedKmH = 0;
             vehiclePhysics.steeringAngle = 0;
