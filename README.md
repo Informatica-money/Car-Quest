@@ -8,7 +8,8 @@ Sam: Product
 
 Floris: qwalieteit
 
-Wat gaat gaat wie doen 
+Wat gaat gaat wie doen
+
 Pim
 - readMe Taken verdeling + wat gebeuren moet
 - Alle teamleden met naam, rol en GitHub-gebruikersnaam
