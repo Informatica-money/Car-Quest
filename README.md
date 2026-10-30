@@ -3,7 +3,9 @@ de github. Car quest
 rollen 
 
 Pim: manager/marketing
+
 Sam: Product 
+
 Floris: qwalieteit
 
 Wat gaat gaat wie doen 
