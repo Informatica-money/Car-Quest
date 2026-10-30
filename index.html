@@ -218,6 +218,13 @@
 
     <!-- Canvas Container -->
     <div id="canvas-container" class="w-full h-full absolute top-0 left-0"></div>
+    <div id="engine-warning" class="hidden absolute top-24 left-1/2 -translate-x-1/2 z-30 glass-panel border border-rose-400/50 text-white px-5 py-3 rounded-2xl shadow-2xl pointer-events-auto text-center">
+        <div class="font-bold text-rose-300"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Motor vastgelopen door water</div>
+        <div class="text-xs text-slate-200 mt-1">Reset de auto om de motor opnieuw te starten.</div>
+    </div>
+    <a id="feedback-link" href="https://docs.google.com/forms/d/e/1FAIpQLSfYSY72NKikcPQl8kgIUoOjlHv_bLrTwoPpgvTkqPzrgI0LbA/viewform" target="_blank" rel="noopener noreferrer" class="hidden absolute top-24 right-6 z-30 glass-panel border border-sky-400/40 text-sky-200 hover:text-white px-4 py-3 rounded-2xl shadow-xl pointer-events-auto text-sm font-bold">
+        <i class="fa-solid fa-comment-dots mr-2"></i>Geef feedback
+    </a>
 
     <!-- HUD Overlay -->
     <div class="absolute inset-0 pointer-events-none flex flex-col justify-between p-6 z-10">
@@ -686,6 +693,7 @@
         const worldChunks = new Map();
         let terrainMaterial;
         let roadMaterial;
+        let riverMaterial;
         let roadPool = [];
         let streamedRoadSegments = new Map();
         let roadWaypoints = [];
@@ -695,6 +703,8 @@
         let treeGeometry, trunkGeometry, treeMaterial, trunkMaterial;
         const SPAWN_POSITION = new THREE.Vector3(0, 0, 0);
         let lastCollisionSoundTime = 0;
+        let isHydrolocked = false;
+        let answeredQuestionCount = 0;
         let gameStarted = false;
         let selectedCarType = 'hatchback';
         let cameraMode = 0; // 0 = 3rd Person (Locked), 1 = Cockpit
@@ -728,7 +738,8 @@
             fuelBurnRate: 1.0,
             pitchOffset: 0,
             rollOffset: 0,
-            surfacePitch: 0
+            surfacePitch: 0,
+            surfaceRoll: 0
         };
 
         function initScene() {
@@ -990,13 +1001,44 @@
         }
 
         function getRawTerrainHeight(x, z) {
-            return noise2D(x * 0.0012, z * 0.0012) * 28
-                + noise2D(x * 0.004, z * 0.004) * 10
-                + noise2D(x * 0.015, z * 0.015) * 2.5;
+            const broadLand = noise2D(x * 0.00055, z * 0.00055) * 18;
+            const hills = noise2D(x * 0.002, z * 0.002) * 12
+                + noise2D(x * 0.008, z * 0.008) * 3;
+            const mountainMask = THREE.MathUtils.smoothstep(
+                noise2D(x * 0.00028 + 41, z * 0.00028 - 17),
+                -0.18,
+                0.52
+            );
+            const ridges = 1 - Math.abs(noise2D(x * 0.0014, z * 0.0014));
+            const mountains = mountainMask * (12 + ridges * 62);
+            const naturalHeight = broadLand + hills + mountains;
+
+            const riverDistance = Math.abs(x - getRiverCenterX(z));
+            const riverCut = 1 - THREE.MathUtils.smoothstep(riverDistance, 7, 42);
+            const riverBed = getRiverWaterHeight(z) - 2.2;
+            return THREE.MathUtils.lerp(naturalHeight, riverBed, riverCut);
         }
 
         function routeRandom(index, salt) {
             return hashNoise(index * 31 + salt, WORLD_SEED);
+        }
+
+        function getRiverCenterX(z) {
+            return noise1D(z / 560 + 182.4) * 74 + noise1D(z / 190 + 73.1) * 14;
+        }
+
+        function getRiverWaterHeight(z) {
+            return noise1D(z / 1100 + 251.7) * 2.5;
+        }
+
+        function getRiverInfo(x, z) {
+            const centerX = getRiverCenterX(z);
+            return {
+                centerX,
+                distance: Math.abs(x - centerX),
+                halfWidth: 12,
+                waterHeight: getRiverWaterHeight(z)
+            };
         }
 
         function createRoadSystem() {
@@ -1232,19 +1274,29 @@
             streamedRoadSegments = newSegments;
         }
 
-        function getTerrainHeight(x, z) {
+        function getTerrainHeight(x, z, includeRoadBlend = true) {
             const terrain = getRawTerrainHeight(x, z);
+            if (!includeRoadBlend) return terrain;
             const nearest = getNearestRoadPoint(x, z);
-            if (nearest.distance > ROAD_WIDTH * 0.5 + 9) return terrain;
-            const blend = THREE.MathUtils.smoothstep(nearest.distance, ROAD_WIDTH * 0.5, ROAD_WIDTH * 0.5 + 9);
+            if (nearest.distance > ROAD_WIDTH * 0.5 + 15) return terrain;
+            const blend = THREE.MathUtils.smoothstep(nearest.distance, ROAD_WIDTH * 0.5 - 0.5, ROAD_WIDTH * 0.5 + 15);
             return THREE.MathUtils.lerp(nearest.point.y, terrain, blend);
         }
 
         function createTerrain() {
             terrainMaterial = new THREE.MeshStandardMaterial({
-                color: 0x4d7c0f,
+                color: 0xffffff,
+                vertexColors: true,
                 roughness: 0.9,
                 metalness: 0.1
+            });
+            riverMaterial = new THREE.MeshStandardMaterial({
+                color: 0x3e9dbd,
+                roughness: 0.24,
+                metalness: 0.08,
+                transparent: true,
+                opacity: 0.9,
+                side: THREE.DoubleSide
             });
         }
 
@@ -1273,6 +1325,7 @@
                 const worldX = chunkX * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localX;
                 const worldZ = chunkZ * CHUNK_SIZE - CHUNK_SIZE * 0.5 + localZ;
                 if (getNearestRoadPoint(worldX, worldZ).distance < ROAD_WIDTH * 0.5 + 5) continue;
+                if (getRiverInfo(worldX, worldZ).distance < 18) continue;
                 if (Math.hypot(worldX - SPAWN_POSITION.x, worldZ - SPAWN_POSITION.z) < 9) continue;
                 const groundY = getTerrainHeight(worldX, worldZ);
                 position.set(localX - CHUNK_SIZE * 0.5, groundY + 5.5, localZ - CHUNK_SIZE * 0.5);
@@ -1292,6 +1345,52 @@
             return colliders;
         }
 
+        function createRiverChunkMesh(chunkX, chunkZ, group) {
+            const originX = chunkX * CHUNK_SIZE;
+            const originZ = chunkZ * CHUNK_SIZE;
+            const samples = 52;
+            const positions = [];
+            const indices = [];
+
+            for (let i = 0; i <= samples; i++) {
+                const t = i / samples;
+                const z = originZ - CHUNK_SIZE * 0.5 + t * CHUNK_SIZE;
+                const centerX = getRiverCenterX(z);
+                const dx = getRiverCenterX(z + 1) - getRiverCenterX(z - 1);
+                const dz = 2;
+                const length = Math.hypot(dx, dz) || 1;
+                const nx = dz / length;
+                const nz = -dx / length;
+                const width = getRiverInfo(centerX, z).halfWidth;
+                const y = getRiverWaterHeight(z) + 0.035;
+
+                positions.push(
+                    centerX + nx * width - originX, y, z + nz * width - originZ,
+                    centerX - nx * width - originX, y, z - nz * width - originZ
+                );
+
+                if (i < samples) {
+                    const middleZ = z + CHUNK_SIZE / samples * 0.5;
+                    const middleX = getRiverCenterX(middleZ);
+                    const crossesRoad = getNearestRoadPoint(middleX, middleZ).distance < ROAD_WIDTH * 0.5 + 1.5;
+                    if (!crossesRoad) {
+                        const a = i * 2;
+                        indices.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+                    }
+                }
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setIndex(indices);
+            geometry.computeVertexNormals();
+            const water = new THREE.Mesh(geometry, riverMaterial);
+            water.position.set(originX, 0, originZ);
+            water.frustumCulled = false;
+            water.renderOrder = 1;
+            group.add(water);
+        }
+
         function createTerrainChunk(chunkX, chunkZ, lod) {
             const segments = lod === 0 ? 32 : 16;
             const geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segments, segments);
@@ -1306,12 +1405,30 @@
                 positions.setY(i, getTerrainHeight(worldX, worldZ));
             }
             geometry.computeVertexNormals();
+            const colors = [];
+            const grassColor = new THREE.Color(0x688848);
+            const highGrassColor = new THREE.Color(0x8e9b6b);
+            const rockColor = new THREE.Color(0x77796f);
+            const snowColor = new THREE.Color(0xd8dedb);
+            const color = new THREE.Color();
+            for (let i = 0; i < positions.count; i++) {
+                const height = positions.getY(i);
+                const normalY = geometry.attributes.normal.getY(i);
+                const elevation = THREE.MathUtils.smoothstep(height, 18, 68);
+                const steepness = 1 - THREE.MathUtils.smoothstep(normalY, 0.48, 0.86);
+                color.copy(grassColor).lerp(highGrassColor, THREE.MathUtils.smoothstep(height, 8, 34));
+                color.lerp(rockColor, Math.max(elevation * 0.88, steepness * 0.82));
+                color.lerp(snowColor, THREE.MathUtils.smoothstep(height, 82, 112) * 0.9);
+                colors.push(color.r, color.g, color.b);
+            }
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
             const group = new THREE.Group();
             group.position.set(originX, 0, originZ);
             const mesh = new THREE.Mesh(geometry, terrainMaterial);
             mesh.receiveShadow = true;
             group.add(mesh);
+            createRiverChunkMesh(chunkX, chunkZ, group);
             group.userData.colliders = createChunkTrees(chunkX, chunkZ, group);
             group.userData.lod = lod;
             scene.add(group);
@@ -1425,7 +1542,7 @@
 
         function updatePhysics(delta) {
             const p = vehiclePhysics;
-            const canDrive = fuelLevel > 0 && !isQuizOpen;
+            const canDrive = fuelLevel > 0 && !isQuizOpen && !isHydrolocked;
 
             let accelForce = 0;
             if (canDrive && keys.forward) {
@@ -1445,6 +1562,14 @@
                 if (Math.abs(p.speed) > 0.1) {
                     accelForce = -p.engineBraking * Math.sign(p.speed);
                 }
+            }
+
+            if (fuelLevel <= 0) {
+                p.speed = 0;
+                accelForce = 0;
+                keys.forward = false;
+                keys.backward = false;
+                if (!isQuizOpen) openQuizModal();
             }
 
             p.speed += accelForce * delta;
@@ -1484,6 +1609,14 @@
                     lastCollisionSoundTime = now;
                 }
             }
+            if (!isHydrolocked && isInDeepRiver(car.position.x, car.position.z)) {
+                isHydrolocked = true;
+                p.speed = 0;
+                keys.forward = false;
+                keys.backward = false;
+                document.getElementById('engine-warning').classList.remove('hidden');
+                playCollisionSound();
+            }
             car.position.y = getTerrainHeight(car.position.x, car.position.z) + 0.1;
 
             // Sample the ground in front of and behind the car to follow hill slopes.
@@ -1499,7 +1632,22 @@
                 * (1 - Math.exp(-delta * 5));
             car.rotation.x = p.surfacePitch;
 
-            // Small body movement from acceleration and steering.
+            const rightX = Math.cos(car.rotation.y);
+            const rightZ = -Math.sin(car.rotation.y);
+            const rightHeight = getTerrainHeight(
+                car.position.x + rightX * 1.6,
+                car.position.z + rightZ * 1.6
+            );
+            const leftHeight = getTerrainHeight(
+                car.position.x - rightX * 1.6,
+                car.position.z - rightZ * 1.6
+            );
+            const slopeRoll = Math.atan2(rightHeight - leftHeight, 3.2);
+            p.surfaceRoll += (THREE.MathUtils.clamp(slopeRoll, -0.4, 0.4) - p.surfaceRoll)
+                * (1 - Math.exp(-delta * 6));
+            car.rotation.z = p.surfaceRoll;
+
+            // Body movement from acceleration and cornering remains local to the chassis.
             const targetPitch = accelForce * 0.003;
             const targetRoll = (-p.steeringAngle * p.speed * 0.06);
             p.pitchOffset += (targetPitch - p.pitchOffset) * (1 - Math.exp(-delta * 6));
@@ -1521,9 +1669,14 @@
             // Live Update Synthesizer Engine Sound with unique car sound profile
             updateAudioEngine(p.rpm, p.speedKmH, keys.forward);
 
-            if (fuelLevel <= 0 && Math.abs(p.speed) < 0.5 && !isQuizOpen) {
-                openQuizModal();
+        }
+
+        function isInDeepRiver(x, z) {
+            const river = getRiverInfo(x, z);
+            if (river.distance > river.halfWidth || getNearestRoadPoint(x, z).distance <= ROAD_WIDTH * 0.5 + 3) {
+                return false;
             }
+            return getRawTerrainHeight(x, z) < river.waterHeight + 0.25;
         }
 
         function collidesWithTree(startX, startZ, endX, endZ) {
@@ -1566,8 +1719,11 @@
             vehiclePhysics.pitchOffset = 0;
             vehiclePhysics.rollOffset = 0;
             vehiclePhysics.surfacePitch = 0;
+            vehiclePhysics.surfaceRoll = 0;
             Object.keys(keys).forEach((key) => { keys[key] = false; });
             if (carModelGroup) carModelGroup.rotation.set(0, 0, 0);
+            isHydrolocked = false;
+            document.getElementById('engine-warning').classList.add('hidden');
             isQuizOpen = false;
             document.getElementById('quiz-modal').classList.add('hidden');
             fuelLevel = 100;
@@ -1683,6 +1839,10 @@
 
         function submitAnswer() {
             if (!currentQuestionObj) return;
+            answeredQuestionCount++;
+            if (answeredQuestionCount >= 3) {
+                document.getElementById('feedback-link').classList.remove('hidden');
+            }
             const inputVal = document.getElementById('quiz-answer').value.trim().toLowerCase();
             const expectedAns = currentQuestionObj.a.toLowerCase();
             const feedback = document.getElementById('quiz-feedback');
