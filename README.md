@@ -28,12 +28,31 @@ Floris
 
 
 WAT MOET ER NOG GEBEUREN IN DE GAME 
-- grond weg blending
-- terain(rievier berg) 
-- engine hydrolock
+
+ grond weg blending aansluiting op de weg geen hoge huivels voor de weg waar de weg op loopt.
 - vragen systeem moet game blocken na 0% feul
 - inverted tiliting
 - zorg dat na een paar vragen een link naar de feedback form in beeld komt
+- 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+WAT IS ONZE GAME 
+
+
 
 
 
