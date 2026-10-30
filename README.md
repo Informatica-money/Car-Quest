@@ -1,5 +1,6 @@
 de github. Car quest 
-wat er nog moet gebeuren
+
+WAT MOET ER NOG GEBEUREN IN DE GAME 
 - grond weg blending
 - terain(rievier berg) 
 - engine hydrolock
